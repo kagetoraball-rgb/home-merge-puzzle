@@ -2,11 +2,12 @@
 /* ホーム画面合体パズル — 画面側。ルールは engine.js (window.HomeMerge) に集約。
  * 操作はドラッグが主（2026-11-09 ユーザー指定でドラッグ制になった後、
  * 2026-11-10 ユーザー指定で「重ねる／入れ替え」の選択制を追加）：
- * - ドラッグで重ねてすぐ離す → 入れ替え（対象がドラッグ元へ滑って避ける）。
- *   重ねたまま約0.5秒ホールドすると「重ねる」プレビューに切り替わり
- *   （合体できる相手のときだけ）、離すと合体。切り替わると、対象の背面に
- *   フォルダ風の台座が開き、対象が少し大きくなり、持っているアイコンは
- *   吸い付くように少し縮む。
+ * - ドラッグで重ねる／入れ替えは「重なっているか」だけで決まる：
+ *   合体できる相手とタイルが重なっている間に離すと合体（静止や
+ *   ホールドは条件にしない）。台座・拡大・吸い付きなどの提示の手順は
+ *   置かず、重なっている間は盤面は通常のまま（対象は元のマスに
+ *   留まるだけ）。重なりが外れるまで進めて離すと入れ替え（対象が
+ *   ドラッグ元へ滑って避ける）。
  * - タップでも移動できる（副操作）。ただし重ねる／入れ替えの選択肢は出さず、
  *   自動判定（合体できる相手なら合体、そうでなければ入れ替え）のまま。
  *   分離はドラッグ操作でのみ行う。
@@ -45,13 +46,15 @@
   const REBEL_EYES = `${REBEL_EYE}${REBEL_EYE_MIRRORED}`;
 
   let state = E.createGame();
-  let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent, dwellTimer, dwellDest }
+  let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent }
   let press = null; // タップ判定用: { pointerId, cell, handled }
   let tapSel = null; // タップ操作で選択中のアイコンID
-  const DWELL_MS = 350; // 「重ねる」が成立するまでの静止ホールド時間（2026-11-10 ユーザー「フォルダ化までが遅いかも」を受けて 500→350 に短縮）
-  const STILL_PX = 12; // この範囲（px）内の動きは「静止」とみなす
-  const CENTER_RATIO = 0.28; // 対象マスの中心からこの割合以内だけを「中心」とみなす
-  const COMMIT_PX = 14; // 対象に到着後これ以上動いたら、その対象は入れ替えで確定（フォルダ候補から外れる）
+  // 「重ねる」の待機ゾーン = 持っているタイルと相手のタイルが実際に
+  // 重なっている範囲（タイル寸法 76×80cqw 同士が重なる条件をマス単位で）。
+  // 中心付近だけに絞らない（2026-11-11 ユーザー指示「重なってたら
+  // 静止してなくても離した時に合体するように」）
+  const OVERLAP_X = 0.76;
+  const OVERLAP_Y = 0.80;
   let winShown = false;   // クリア演出を出したか
   let winTimers = [];     // クリア演出のタイマー
   // （反抗アイコンは持った瞬間に発動するので、タップ判定待ちの状態は持たない）
@@ -190,7 +193,7 @@
 
   restartBtn.addEventListener('click', () => {
     resetWinOverlay();
-    if (drag) { resetDwell(); removeGhost(); drag = null; }
+    if (drag) { removeGhost(); drag = null; }
     press = null;
     tapSel = null;
     state = E.createGame();
@@ -227,152 +230,63 @@
     return { x: Number(cell.dataset.x), y: Number(cell.dataset.y) };
   }
 
-  // ポインターに一番近い候補マス（開始マス含む）を選ぶ
-  function nearestTarget(clientX, clientY) {
+  // ドラッグの対象マスと意図をポインター位置から選ぶ。
+  // 対象は「中心が一番近いマス」ではなく「タイルが重なっているか」で
+  // 決める（2026-11-11 ユーザー報告「重なっても離したら入れ替わりに
+  // なることが多い」の対策：中心の近さで選ぶと、半分を過ぎた時点で
+  // 隣のマスに切り替わり、まだ重なって見えるのに隣と入れ替わった）：
+  // - 合体できる相手と重なっていれば、その相手を最優先で対象にする
+  //   （隣のマスと両方に重なる位置でも、合体が勝つ）
+  // - 重なる候補がなければ、重なる範囲の候補→全体の順で中心が
+  //   一番近いものを対象にする（従来の感覚を保つ）
+  function pickDragTarget(clientX, clientY) {
     const rect = boardEl.getBoundingClientRect();
     const fx = (clientX - rect.left) / (rect.width / state.cols) - 0.5;
     const fy = (clientY - rect.top) / (rect.height / state.rows) - 0.5;
-    let best = null, bestD = Infinity;
     const candidates = [{ x: drag.fromX, y: drag.fromY, dest: null }]
       .concat(drag.dests.map(d => ({ x: d.x, y: d.y, dest: d })));
-    for (const c of candidates) {
-      const dd = (c.x - fx) * (c.x - fx) + (c.y - fy) * (c.y - fy);
-      if (dd < bestD) { bestD = dd; best = c; }
+    const dist2 = c => (c.x - fx) * (c.x - fx) + (c.y - fy) * (c.y - fy);
+    const overlaps = c => Math.abs(fx - c.x) < OVERLAP_X && Math.abs(fy - c.y) < OVERLAP_Y;
+    const mergeable = candidates.filter(c => c.dest && overlaps(c)
+      && E.moveIntents(state, drag.iconId, c.dest.x, c.dest.y).includes('merge'));
+    if (mergeable.length) {
+      mergeable.sort((a, b) => dist2(a) - dist2(b));
+      return { dest: mergeable[0].dest, intent: 'merge' };
     }
-    return best;
+    const over = candidates.filter(overlaps);
+    const pool = over.length ? over : candidates;
+    pool.sort((a, b) => dist2(a) - dist2(b));
+    return { dest: pool[0].dest, intent: 'swap' };
   }
 
-  // ドラッグ中のプレビューを、現在の intent で描き直す
+  // ドラッグ中のプレビューを、現在の intent で描き直す。
+  // 提示の手順は置かない（2026-11-11 ユーザー指示「台座とか手順
+  // いらないから、重なった状態で離したらくっつくにして」）：
+  // - 重ねる（重なっている間）: 盤面は通常のまま。対象は元のマスに
+  //   留まるだけで、台座も拡大も吸い付きも出さない。このまま離せば合体
+  // - 入れ替え: 対象がドラッグ元へ滑る解決を見せる（従来どおり）
   function renderDragPreview() {
     if (!drag.target) { flipRender(state.icons, drag.iconId); return; }
-    // - offer 中（到着直後）：対象はまだずれていない実機の状態そのままに、
-    //   対象をその場に留める。このまま離せば結果は入れ替え（離した瞬間に
-    //   交換のアニメーションが付く）
-    // - 入れ替え確定後：対象がドラッグ元へ滑る解決を見せる
-    // - 重ねる成立後：対象が元のマスに戻り、台座が開く解決を見せる
-    if (drag.phase === 'offer' && drag.intent !== 'merge') {
-      flipRender(state.icons, drag.iconId);
-    } else {
-      const sim = E.simulateMove(state, drag.iconId, drag.target.dir, drag.target.dist, drag.intent);
-      flipRender(sim ? sim.icons : state.icons, drag.iconId);
-    }
-    decorateDragTarget();
-    if (drag.ghost) {
-      // 「重ねる」状態では、持っているアイコンが吸い付くように少し縮む
-      drag.ghost.classList.toggle('sucked', drag.intent === 'merge');
-      // ホールドの進み具合は、ゴーストが 0.5 秒かけて少し縮むことで示す
-      drag.ghost.classList.toggle('arming', drag.intent !== 'merge' && !!drag.dwellTimer);
-    }
+    if (drag.intent === 'merge') { flipRender(state.icons, drag.iconId); return; }
+    const sim = E.simulateMove(state, drag.iconId, drag.target.dir, drag.target.dist, drag.intent);
+    flipRender(sim ? sim.icons : state.icons, drag.iconId);
   }
 
-  // プレビュー中の対象マスに「重ねる」の提示を付ける（文字は出さない）。
-  // 台座はホールド成立（intent='merge'）のときだけ出す：対象の背面に
-  // フォルダ風の台座が開き、対象が少し大きくなって「受け入れる」見た目に
-  // なる。成立前は入れ替えの滑りだけを見せる（提示の順序で区別する）
-  function decorateDragTarget() {
-    if (!drag || !drag.target) return;
-    if (drag.intent !== 'merge') return;
-    const cell = boardEl.querySelector(`.cell[data-x="${drag.target.x}"][data-y="${drag.target.y}"]`);
-    if (!cell) return;
-    const pedestal = document.createElement('div');
-    pedestal.className = 'merge-pedestal open';
-    cell.insertBefore(pedestal, cell.firstChild);
-    cell.classList.add('merge-target');
-  }
-
-  // ホールド（ドウェル）の後始末
-  function resetDwell() {
-    if (!drag) return;
-    if (drag.dwellTimer) { clearTimeout(drag.dwellTimer); drag.dwellTimer = null; }
-    drag.dwellDest = null;
-  }
-
+  // ドラッグの対象と意図（重ねる／入れ替え）をポインター位置から決める。
+  // （2026-11-11 ユーザー指示で旧ドウェル方式から移行し、同日中に
+  // 提示の手順も撤去）：重ねられる相手とタイルが重なっている間は
+  // intent='merge' で、静止していなくても離せば合体する。重なりが
+  // 外れるまで進めた位置では入れ替えになり、離せば入れ替わる。
+  // 対象か意図が変わったときだけ描き直す（毎イベントの再構築は、
+  // フォルダ版で実証されたとおり表示の崩れの原因になる）
   function updateDragTarget(clientX, clientY) {
-    const near = nearestTarget(clientX, clientY);
-    const key = near.dest ? `${near.dest.x},${near.dest.y}` : 'start';
-    if (drag.targetKey === key) return;
+    const pick = pickDragTarget(clientX, clientY);
+    const key = pick.dest ? `${pick.dest.x},${pick.dest.y}` : 'start';
+    if (drag.targetKey === key && drag.intent === pick.intent) return;
     drag.targetKey = key;
-    drag.target = near.dest;
-    resetDwell();
-    drag.stillX = null; drag.stillY = null;
-    // offer は「重ねられる相手」のときだけ。重ねられない相手は最初から
-    // 入れ替え確定（対象はすぐ滑る）
-    drag.phase = near.dest
-      ? (E.moveIntents(state, drag.iconId, near.dest.x, near.dest.y).includes('merge') ? 'offer' : 'swap')
-      : null;
-    drag.nearD = null; // 中心への最接近点は trackDwell が記録する
-    drag.intent = 'swap'; // すぐ離せば入れ替え。中心で静止すると「重ねる」に切り替わる
+    drag.target = pick.dest;
+    drag.intent = pick.intent;
     renderDragPreview();
-  }
-
-  // 「重ねる」の成立条件（実機 iOS のホーム画面の仕様に倣う。2026-11-10 調査：
-  // Apple 公式は並び替えを「別の場所へドラッグ」、フォルダ作成を「別のアプリの
-  // 上へドラッグ」と定義し、解説では (1) ドラッグ中のアイコンが動いている間に
-  // 対象へ到達すると移動として扱われアイコンが避ける、(2) フォルダ化は対象の
-  // 「中心」の上で指を静止させたときだけ、とされている）：
-  // 静止の判定は「ポインターイベントが止んでから DWELL_MS 経つこと」とする。
-  // 実ブラウザ検証で判明した失敗：許容範囲（12px）内の微動は静止とみなす方式
-  // では、狙いを定める指の震え（±数px）でもタイマーが満了し、「入れ替えた後に
-  // フォルダが作られる」問題が再現した。指が動いている限りイベントは届き続け
-  // るので、そのたびにタイマーを仕切り直せば、完全に止めたときだけ成立する。
-  // 成立後に大きく動かせば解除される（実機で対象から外す操作に相当）
-  function trackDwell(clientX, clientY) {
-    if (!drag || !drag.active) return;
-    drag.lastX = clientX; drag.lastY = clientY;
-    const dest = drag.target;
-    const stackable = !!dest && E.moveIntents(state, drag.iconId, dest.x, dest.y).includes('merge');
-    if (!stackable) { resetDwell(); syncGhostArming(); return; }
-    const rect = boardEl.getBoundingClientRect();
-    const cw = rect.width / state.cols, ch = rect.height / state.rows;
-    const cx = rect.left + (dest.x + 0.5) * cw;
-    const cy = rect.top + (dest.y + 0.5) * ch;
-    const centered = Math.abs(clientX - cx) <= cw * CENTER_RATIO && Math.abs(clientY - cy) <= ch * CENTER_RATIO;
-    if (drag.intent === 'merge') {
-      // 成立後：中心を外れるか、成立位置から大きく動いたら解除する。
-      // それ以外の微動では成立を保つ
-      if (!centered || Math.hypot(clientX - drag.engageX, clientY - drag.engageY) > STILL_PX) {
-        drag.intent = 'swap';
-        drag.phase = 'swap';
-        renderDragPreview();
-      } else return;
-    }
-    if (drag.phase !== 'offer') { resetDwell(); syncGhostArming(); return; }
-    // 中心への最接近点を記録する。中心へ近づく動き（到着の動作）は確定に
-    // 数えず、最接近点から離れる動き（位置の調整・行き過ぎ）だけが対象を
-    // 入れ替えで確定させる。一度確定したら、その対象の上ではどれだけ
-    // 止まってもフォルダ化しない（実機で、ずれた後のマスは「空き位置」
-    // であり重ねる対象ではない）
-    const distC = Math.hypot(clientX - cx, clientY - cy);
-    if (drag.nearD === null || distC < drag.nearD) {
-      drag.nearD = distC; drag.nearX = clientX; drag.nearY = clientY;
-    }
-    if (Math.hypot(clientX - drag.nearX, clientY - drag.nearY) > COMMIT_PX) {
-      drag.phase = 'swap';
-      resetDwell();
-      renderDragPreview();
-      syncGhostArming();
-      return;
-    }
-    if (!centered) { resetDwell(); syncGhostArming(); return; }
-    // 到着したまま中心で静止している：イベントが来るたびにタイマーを仕切り直す
-    startStillTimer(dest);
-  }
-
-  function startStillTimer(dest) {
-    resetDwell();
-    drag.dwellDest = dest;
-    drag.dwellTimer = setTimeout(() => {
-      if (!drag || drag.dwellDest !== dest) return;
-      drag.dwellTimer = null;
-      drag.intent = 'merge';
-      drag.engageX = drag.lastX; drag.engageY = drag.lastY;
-      renderDragPreview();
-    }, DWELL_MS);
-    syncGhostArming();
-  }
-
-  function syncGhostArming() {
-    if (drag && drag.ghost) drag.ghost.classList.toggle('arming', drag.intent !== 'merge' && !!drag.dwellTimer);
   }
 
   // ゴーストは残らず消す（過去の取り残しも含めて全部）
@@ -384,7 +298,6 @@
   // ドラッグを中断して盤面を元の表示に戻す（異常終了時の後始末）
   function cancelDrag() {
     const wasActive = drag && drag.active;
-    resetDwell();
     removeGhost();
     drag = null;
     press = null;
@@ -423,7 +336,7 @@
       iconId: icon.id, fromX: pos.x, fromY: pos.y,
       startX: e.clientX, startY: e.clientY, pointerId: e.pointerId,
       active: false, ghost: null, dests, target: null, targetKey: 'start',
-      intent: 'swap', dwellTimer: null, dwellDest: null, stillX: null, stillY: null, phase: null, nearX: 0, nearY: 0, nearD: null,
+      intent: 'swap',
     };
     // タップ選択はここでは消さない（離したときにタップとして処理するため）。
     // 実際にドラッグが始まった時点で、pointermove 側で選択を解除する
@@ -471,17 +384,20 @@
     drag.ghost.style.left = e.clientX + 'px';
     drag.ghost.style.top = e.clientY + 'px';
     updateDragTarget(e.clientX, e.clientY);
-    trackDwell(e.clientX, e.clientY);
   });
 
-  function finishPointer(cancelled) {
+  function finishPointer(cancelled, upX, upY) {
     if (!drag) return;
     const wasActive = drag.active;
+    // 離した瞬間の位置で対象と意図を決め直す（最後の pointermove の
+    // 位置のまま確定すると、指の動きに判定が遅れて付いてくる）
+    if (wasActive && !cancelled && typeof upX === 'number' && typeof upY === 'number') {
+      updateDragTarget(upX, upY);
+    }
     const target = drag.target;
     const intent = drag.intent;
     const iconId = drag.iconId;
     const fromCell = { x: drag.fromX, y: drag.fromY };
-    resetDwell();
     removeGhost();
     drag = null;
     if (!wasActive) {
@@ -504,7 +420,7 @@
     if (drag) {
       if (e.pointerId !== drag.pointerId) return;
       press = null;
-      finishPointer(false);
+      finishPointer(false, e.clientX, e.clientY);
       return;
     }
     // ドラッグにならなかった押下（眠っているアイコン・空きマスなど）もタップとして扱う
@@ -796,7 +712,7 @@
   document.getElementById('initBtn').addEventListener('click', () => {
     resetWinOverlay();
     state = E.createGame();
-    if (drag) { resetDwell(); removeGhost(); drag = null; }
+    if (drag) { removeGhost(); drag = null; }
     press = null;
     tapSel = null;
     settingsSheet.hidden = true;

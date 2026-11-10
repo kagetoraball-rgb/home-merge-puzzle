@@ -227,6 +227,28 @@ function tryStepOnBoard(work, mover, dir, board, isFinal, intent, ctx) {
   if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return null;
   if (isReservedCell(nx, ny)) return null; // アプリ（設定・検索）のマスには入らない
   const folders = ctx ? ctx.folders : [];
+  // 通過直後は自分のマスに同種が残っている（重なった状態）。そのままでは
+  // 入れ替え相手の行き場が無いため、同種を経路の後方へ1マスずつずらして
+  // 自分のマスを空ける（入れ替えの連鎖。後方に連なる同種をたどり、
+  // 最初の空きマスまで送る）。後方に異種が詰まっている等で空けられ
+  // ない場合は false を返し、そのステップ自体が成立しない
+  function unshare() {
+    const shared = work.find(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y);
+    if (!shared) return true;
+    const chain = [shared];
+    let cx = mover.x, cy = mover.y;
+    for (;;) {
+      const bx = cx - dir[0], by = cy - dir[1];
+      if (bx < 0 || by < 0 || bx >= cols || by >= rows) return false;
+      const back = work.find(i => i.id !== mover.id && i.x === bx && i.y === by);
+      if (!back) break;
+      if (back.type !== mover.type) return false;
+      chain.push(back);
+      cx = bx; cy = by;
+    }
+    for (let k = chain.length - 1; k >= 0; k--) { chain[k].x -= dir[0]; chain[k].y -= dir[1]; }
+    return true;
+  }
   const folder = folderAtIn(folders, nx, ny);
   if (folder) {
     if (isFinal && intent === 'merge' && ctx.allowFolder && canStore(folder, mover.type)) {
@@ -235,8 +257,9 @@ function tryStepOnBoard(work, mover, dir, board, isFinal, intent, ctx) {
       return { icons: rest, folders, resultId: mover.id, merged: false, foldered: true, stored: true, folderId: folder.id };
     }
     // 収納できない場合はフォルダと入れ替わる（アイコン同士の入れ替えと同じ。
-    // 通過直後で自分のマスに同種が残っている場合は入れ替われない）
-    if (work.some(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y)) return null;
+    // 通過直後で自分のマスに同種が残っている場合は、先に同種を後方へ
+    // ずらして空ける）
+    if (!unshare()) return null;
     folder.x = mover.x; folder.y = mover.y;
     mover.x = nx; mover.y = ny;
     return { icons: work, folders, resultId: mover.id, merged: false, swapped: true, folderSwapped: true };
@@ -264,8 +287,9 @@ function tryStepOnBoard(work, mover, dir, board, isFinal, intent, ctx) {
     return { icons: work, folders, resultId: mover.id, merged: false, passed: true };
   }
   // 入れ替わる（押し出しはしない）
-  // ただし、通過直後で自分のマスに同種が残っている場合は入れ替われない（重なってしまうため）
-  if (work.some(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y)) return null;
+  // 通過直後で自分のマスに同種が残っている場合は、先に同種を後方へ
+  // ずらして空ける（unshare）。それでも空けられなければ入れ替われない
+  if (!unshare()) return null;
   target.x = mover.x; target.y = mover.y;
   mover.x = nx; mover.y = ny;
   return { icons: work, folders, resultId: mover.id, merged: false, swapped: true };
@@ -510,6 +534,73 @@ function applyMove(state, iconId, dest) {
 }
 
 /*
+ * 経路ベースの移動を試す（2026-11-10 ユーザー指示「入れ替えの時は自分の
+ * 方向とか関係ないようにして」に対応する経路方式）。
+ * path はドラッグしたアイコンが順に踏むマス（8近傍のステップ列、開始マス
+ * は含まない）。各ステップは入れ替えとして解決する（tryStepOnBoard の
+ * swap 解決。途中の同種通過・フォルダとの入れ替えを含む）。
+ * opts.folderTarget を渡すと、path を踏み終えた位置からそのマスへ
+ * 「重ねる」最終ステップを行い、フォルダ作成／収納になれば成功、
+ * なれなければ（カテゴリ条件に合わない等）null を返す。
+ * 戻り値の形は simulateMove と同じ。
+ */
+function simulatePathMove(state, iconId, path, opts = {}) {
+  let icons = cloneIcons(state.icons);
+  let folders = cloneFolders(state.folders);
+  const ctx = { folders, allowFolder: true };
+  let resultId = iconId;
+  let swapped = false;
+  let steps = 0;
+  const folderTarget = opts.folderTarget || null;
+  function stepTo(tx, ty, isFinal, intent) {
+    const cur = icons.find(i => i.id === resultId);
+    if (!cur) return null;
+    const dir = [tx - cur.x, ty - cur.y];
+    if (Math.abs(dir[0]) > 1 || Math.abs(dir[1]) > 1 || (dir[0] === 0 && dir[1] === 0)) return null;
+    const r = tryStepOnBoard(icons, cur, dir, state, isFinal, intent, ctx);
+    if (!r) return null;
+    icons = r.icons;
+    folders = r.folders || folders;
+    if (r.swapped) swapped = true;
+    steps++;
+    return r;
+  }
+  for (let s = 0; s < path.length; s++) {
+    const r = stepTo(path[s].x, path[s].y, s === path.length - 1 && !folderTarget, 'swap');
+    if (!r || r.foldered) return null;
+    resultId = r.resultId;
+  }
+  if (folderTarget) {
+    const r = stepTo(folderTarget.x, folderTarget.y, true, 'merge');
+    if (!r || !r.foldered) return null;
+    return { icons, folders, resultId: r.resultId, steps, merged: false, swapped, foldered: true, folderId: r.folderId };
+  }
+  return { icons, folders, resultId, steps, merged: false, swapped, foldered: false };
+}
+
+// 経路ベースの移動を実行する。経過の進め方は applyMove と同じ
+// （progressAfterMove を共用する）
+function applyPathMove(state, iconId, path, folderTarget) {
+  if (state.status !== 'playing') return { ok: false, reason: 'ゲームは終了しています' };
+  const icon = state.icons.find(i => i.id === iconId);
+  if (!icon) return { ok: false, reason: 'アイコンがありません' };
+  if (icon.z > 0) return { ok: false, reason: '睡眠中は自分から動けません' };
+  if (icon.mood === 'rebel') return { ok: false, reason: '反抗中は applyRebelMove を使ってください' };
+  if ((!path || path.length === 0) && !folderTarget) return { ok: false, reason: '移動していません' };
+  const sim = simulatePathMove(state, iconId, path, { folderTarget: folderTarget || null });
+  if (!sim) return { ok: false, reason: '移動できません' };
+  const wasEager = icon.mood === 'eager';
+  state.icons = sim.icons;
+  state.folders = sim.folders;
+  if (sim.foldered) {
+    const events = progressAfterMove(state, -1, sim.steps, false);
+    return { ok: true, steps: sim.steps, merged: false, foldered: true, folderId: sim.folderId, events };
+  }
+  const events = progressAfterMove(state, sim.resultId, sim.steps, wasEager);
+  return { ok: true, steps: sim.steps, merged: false, foldered: false, events };
+}
+
+/*
  * フォルダの解除（暫定仕様。FOLDER.md に明記）:
  * 収納アイコンを、フォルダ周囲（8近傍）の空きマスへ読み順に配置する。
  * 周囲だけで足りない場合は、盤面全体の空きマスを読み順に使って補う。
@@ -534,6 +625,45 @@ function applyFolderRelease(state, folderId) {
   });
   state.folders = state.folders.filter(f => f.id !== folderId);
   return { ok: true, placed };
+}
+
+/*
+ * フォルダから1個だけ取り出す（フォルダを開いた画面で中身をタップした
+ * ときの操作。スマホ準拠：開いたフォルダからアプリを出す動き）。
+ * 置き場所は解除と同じ優先順（フォルダ周囲の空きマス→盤面全体、読み順）。
+ * 取り出しは「移動」として数えない（解除と同じ）。
+ * 残りが1個になったら、空きがあれば最後の1個も出してフォルダは消える
+ * （スマホで最後のアプリを出すとフォルダが消えるのと同じ）。
+ * 空きが無ければ取り出せない。
+ */
+function applyFolderExtract(state, folderId, memberId) {
+  const folder = (state.folders || []).find(f => f.id === folderId);
+  if (!folder) return { ok: false, reason: 'フォルダがありません' };
+  const idx = folder.members.findIndex(m => m.id === memberId);
+  if (idx < 0) return { ok: false, reason: 'そのアイコンは入っていません' };
+  const empties = emptyCells(state);
+  if (empties.length === 0) return { ok: false, reason: '空きマスがありません' };
+  const around = empties.filter(c => Math.abs(c.x - folder.x) <= 1 && Math.abs(c.y - folder.y) <= 1);
+  const rest = empties.filter(c => !(Math.abs(c.x - folder.x) <= 1 && Math.abs(c.y - folder.y) <= 1));
+  const cells = around.concat(rest);
+  const placed = [];
+  const take = (member, cell) => {
+    const icon = { ...member, x: cell.x, y: cell.y, count: 1, z: 0, mood: 'normal', neglect: 0 };
+    state.icons.push(icon);
+    placed.push({ iconId: icon.id, x: cell.x, y: cell.y });
+  };
+  take(folder.members[idx], cells[0]);
+  folder.members.splice(idx, 1);
+  if (folder.members.length === 1 && cells.length >= 2) {
+    take(folder.members[0], cells[1]);
+    folder.members = [];
+  }
+  let dissolved = false;
+  if (folder.members.length === 0) {
+    state.folders = state.folders.filter(f => f.id !== folderId);
+    dissolved = true;
+  }
+  return { ok: true, placed, dissolved };
 }
 
 /*
@@ -575,8 +705,9 @@ const api = {
   inside, iconAt: (state, x, y) => iconAt(state.icons, x, y), emptyCells, installCell,
   SETTINGS_CELL, isSettingsCell, SEARCH_CELL, isSearchCell, isReservedCell,
   destinations, moveIntents, applyMove, applyRebelMove, simulateMove, rollMood,
+  simulatePathMove, applyPathMove,
   folderAt: (state, x, y) => folderAtIn(state.folders, x, y),
-  folderCategory, canStore, applyFolderRelease,
+  folderCategory, canStore, applyFolderRelease, applyFolderExtract,
   destinationsForFolder, applyFolderMove,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

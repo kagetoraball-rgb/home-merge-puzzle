@@ -10,8 +10,8 @@
  * - フォルダもドラッグで動かせる（周囲8マスへ1マス。アイコン／フォルダと
  *   位置交換になり、1手として数える）。ただしフォルダが動いてアイコンを
  *   取り込むことはしない。条件に合わないアイコンをフォルダに重ねても、
- *   収納されず入れ替えになる。タップ1回で解除の提示（拡大して揺れる）、
- *   もう1回タップで確定し、中身が周囲の空きマスへ出る。
+ *   収納されず入れ替えになる。フォルダをタップすると開く画面が出て、
+ *   中身をタップするとそのアイコンが周囲の空きマスへ出る。
  * - タップ移動ではフォルダ化しない（入れ替え・移動のみの自動判定）。
  * 区別は文字ではなく「提示」だけで伝える（2026-11-10 ユーザー指定
  * 「定義じゃなくて提示」、実機のホーム画面に準拠）。
@@ -47,14 +47,10 @@
   const REBEL_EYES = `${REBEL_EYE}${REBEL_EYE_MIRRORED}`;
 
   let state = E.createGame();
-  let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent, dwellTimer, dwellDest }
+  let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent, phase }
   let press = null; // タップ判定用: { pointerId, cell, handled }
   let tapSel = null; // タップ操作で選択中のアイコンID
-  let armedFolderId = null; // 解除の提示中フォルダID（タップ1回目で提示、2回目で確定）
-  const DWELL_MS = 350; // 「重ねる」が成立するまでの静止ホールド時間（2026-11-10 ユーザー「フォルダ化までが遅いかも」を受けて 500→350 に短縮）
-  const STILL_PX = 12; // この範囲（px）内の動きは「静止」とみなす
-  const CENTER_RATIO = 0.28; // 対象マスの中心からこの割合以内だけを「中心」とみなす
-  const COMMIT_PX = 14; // 対象に到着後これ以上動いたら、その対象は入れ替えで確定（フォルダ候補から外れる）
+  let openFolderId = null; // 開いているフォルダ画面のフォルダID
   let winShown = false;   // クリア演出を出したか
   let winTimers = [];     // クリア演出のタイマー
   // （反抗アイコンは持った瞬間に発動するので、タップ判定待ちの状態は持たない）
@@ -195,18 +191,17 @@
 
   restartBtn.addEventListener('click', () => {
     resetWinOverlay();
-    if (drag) { resetDwell(); removeGhost(); drag = null; }
+    if (drag) { removeGhost(); drag = null; }
     press = null;
     tapSel = null;
     state = E.createGame();
     render(state.icons, null);
   });
 
-  // フォルダのタイル： 中身のミニアイコン（最大9個）を並べた、実機風の見た目。
-  // 解除の提示中（armedFolderId がこのフォルダ）は拡大して小刻みに揺れる
+  // フォルダのタイル： 中身のミニアイコン（最大9個）を並べた、実機風の見た目
   function folderStackEl(folder) {
     const stack = document.createElement('div');
-    stack.className = 'folder-stack' + (armedFolderId === folder.id ? ' armed' : '');
+    stack.className = 'folder-stack';
     stack.dataset.folderId = folder.id;
     const tile = document.createElement('div');
     tile.className = 'folder-tile';
@@ -263,33 +258,168 @@
   }
 
   // ドラッグ中のプレビューを、現在の intent で描き直す
+  // ドラッグ中のプレビューを描き直す（経路方式。drag.path と
+  // drag.folderTarget は updateDragTarget が決める）
+  // 提示は「今離したら何が起きるか」と常に一致させる：
+  // - フォルダ化の待機（folderTarget あり）：土台は「経路の手前までの
+  //   押し出しが済んだ盤面」で、対象だけがフォルダに入った姿で待機する。
+  //   持っているアイコンはまだ入っていない（離した時点で入る）
+  // - 入れ替え（path のみ）：経路に沿った押し出しの結果を見せる
   function renderDragPreview() {
-    if (!drag.target) { flipRender(state.icons, drag.iconId, state.folders); return; }
-    // 提示は「今離したら何が起きるか」と常に一致させる：
-    // - offer 中（到着直後）：対象はまだずれていない実機の状態そのままに、
-    //   対象をその場に留める。このまま離せば結果は入れ替え（離した瞬間に
-    //   交換のアニメーションが付く）
-    // - 入れ替え確定後：対象がドラッグ元へ滑る解決を見せる
-    // - 重ねる成立後：対象が元のマスに戻り、台座が開く解決を見せる
-    if (drag.phase === 'offer' && drag.intent !== 'merge') {
+    if (!drag.path.length && !drag.folderTarget) {
       flipRender(state.icons, drag.iconId, state.folders);
+      return;
+    }
+    if (drag.folderTarget) {
+      const t = drag.folderTarget;
+      const base = drag.path.length
+        ? E.simulatePathMove(state, drag.iconId, drag.path, {})
+        : null;
+      const baseIcons = base ? base.icons : state.icons;
+      const baseFolders = base ? base.folders : state.folders;
+      const tIcon = baseIcons.find(i => i.x === t.x && i.y === t.y);
+      const tFolder = baseFolders.find(f => f.x === t.x && f.y === t.y);
+      // 対象がフォルダなら既にフォルダ状態なので、そのまま待機表示。
+      // 対象がアイコンなら、そのアイコンだけを収めた見かけのフォルダ
+      // （表示専用・状態は変えない）で待機を示す
+      const dispFolders = (!tFolder && tIcon)
+        ? baseFolders.concat([{ id: '__standby__', x: t.x, y: t.y, members: [{ ...tIcon }] }])
+        : baseFolders;
+      flipRender(baseIcons, drag.iconId, dispFolders);
     } else {
-      const sim = E.simulateMove(state, drag.iconId, drag.target.dir, drag.target.dist, drag.intent, { allowFolder: drag.intent === 'merge' });
+      const sim = E.simulatePathMove(state, drag.iconId, drag.path, {});
       flipRender(sim ? sim.icons : state.icons, drag.iconId, sim ? sim.folders : state.folders);
     }
     decorateDragTarget();
     if (drag.ghost) {
       // 「重ねる」状態では、持っているアイコンが吸い付くように少し縮む
-      drag.ghost.classList.toggle('sucked', drag.intent === 'merge');
-      // ホールドの進み具合は、ゴーストが 0.5 秒かけて少し縮むことで示す
-      drag.ghost.classList.toggle('arming', drag.intent !== 'merge' && !!drag.dwellTimer);
+      drag.ghost.classList.toggle('sucked', !!drag.folderTarget);
     }
   }
 
-  // プレビュー中の対象マスに「重ねる」の提示を付ける（文字は出さない）。
-  // 台座はホールド成立（intent='merge'）のときだけ出す：対象の背面に
-  // フォルダ風の台座が開き、対象が少し大きくなって「受け入れる」見た目に
-  // なる。成立前は入れ替えの滑りだけを見せる（提示の順序で区別する）
+  function renderFolderPreview() {
+    const tx = drag.target ? drag.target.x : null;
+    const ty = drag.target ? drag.target.y : null;
+    let icons = state.icons;
+    if (drag.target) {
+      const icon = icons.find(i => i.x === tx && i.y === ty);
+      if (icon) icons = icons.map(i => (i.id === icon.id ? { ...i, x: drag.fromX, y: drag.fromY } : i));
+    }
+    const folders = [];
+    for (const f0 of state.folders) {
+      // 持っているフォルダ自身は盤面に描かない（アイコン版で hideId に
+      // 相当）。指に付いたゴーストが実物で、盤面にも描くと二重像に
+      // なり「残像」に見える（2026-11-10 ユーザー報告）
+      if (f0.id === drag.folderId) continue;
+      if (drag.target && f0.x === tx && f0.y === ty) {
+        folders.push({ ...f0, x: drag.fromX, y: drag.fromY });
+      } else folders.push(f0);
+    }
+    flipRender(icons, null, folders);
+  }
+
+  // アイコンのドラッグ先の決め方（2026-11-10 ユーザー指示の挿入方式）：
+  // 行き先は「マス」ではなく「アイコンの間」。対象マスの中心付近だけが
+  // 「上に重ねた」扱いでフォルダの待機に入り、それ以外（中心より手前／
+  // 先）は「間」への挿入として、中心を過ぎたマス／手前のマスが着地点に
+  // なる。例：123 の並びで 1 を 2 の位置にしたいなら、2 と 3 の間
+  // （2 の中心を過ぎたあたり）に持ってくる。2 はドラッグ元側へ押し出
+  // され、1 が 2 のマスに入る
+  // 対象マスの中心からこの範囲（マス単位・半径）が「上に重ねた」
+  const FOLDER_ZONE = 0.25;
+
+  // 挿入／フォルダ化の計画をポインタ位置から決める（経路方式）。
+  // 2026-11-10 ユーザー訂正「ドラッグ中はドラッグしてるアイコンのみ
+  // その方向に縛られる」：動かしているアイコンは自分の方向のライン上
+  // だけを進む。入れ替わる相手は自分の方向に縛られない（経路に沿って
+  // そのまま押し出される。例：斜めに押されたヨコは斜めへずれる）。
+  // 目標は「指の位置に最も近い、自分のライン上のマス」。進み方の規則
+  // （次のマス W について）:
+  // - W が目標のマスで、重ねられる相手がいて、ポインタが W の中心付近
+  //   （半径 FOLDER_ZONE 以内）→ フォルダ化の待機（W へは進まない）
+  // - W にアイコン（または収納できるフォルダ）がある → 中心を過ぎたら進む
+  // - W が空き（または収納できないフォルダ）→ 半分過ぎたら進む
+  function computeDragPlan(clientX, clientY) {
+    const rect = boardEl.getBoundingClientRect();
+    const none = { path: [], folderTarget: null };
+    if (rect.width === 0) return none;
+    const fx = (clientX - rect.left) / (rect.width / state.cols) - 0.5;
+    const fy = (clientY - rect.top) / (rect.height / state.rows) - 0.5;
+    const draggedIcon = state.icons.find(i => i.id === drag.iconId);
+    if (!draggedIcon) return none;
+    const origin = { x: drag.fromX, y: drag.fromY };
+    // 自分の方向のライン上のマスから、指に最も近いものを目標にする
+    let best = null;
+    for (const dir of E.TYPES[draggedIcon.type].dirs) {
+      for (let k = 1; k < 40; k++) {
+        const cx = origin.x + dir[0] * k, cy = origin.y + dir[1] * k;
+        if (cx < 0 || cy < 0 || cx >= state.cols || cy >= state.rows) break;
+        if (E.isReservedCell(cx, cy)) break;
+        const d = (cx - fx) * (cx - fx) + (cy - fy) * (cy - fy);
+        if (!best || d < best.d) best = { d, dir, x: cx, y: cy };
+      }
+    }
+    if (!best) return none;
+    const px = best.x, py = best.y, dir = best.dir;
+    const path = [];
+    let v = { ...origin };
+    let guard = 0;
+    while ((v.x !== px || v.y !== py) && guard++ < 40) {
+      const sim = path.length ? E.simulatePathMove(state, drag.iconId, path, {}) : null;
+      const vIcons = sim ? sim.icons : state.icons;
+      const vFolders = sim ? sim.folders : state.folders;
+      const w = { x: v.x + dir[0], y: v.y + dir[1] };
+      const occIcon = vIcons.find(i => i.id !== drag.iconId && i.x === w.x && i.y === w.y);
+      const occFolder = vFolders.find(f => f.x === w.x && f.y === w.y);
+      const storable = occFolder ? E.canStore(occFolder, draggedIcon.type) : false;
+      const isLast = w.x === px && w.y === py;
+      if (isLast && Math.hypot(fx - w.x, fy - w.y) <= FOLDER_ZONE && (occIcon || storable)) {
+        return { path, folderTarget: w };
+      }
+      const axisLen = Math.hypot(dir[0], dir[1]);
+      const prog = ((fx - v.x) * dir[0] + (fy - v.y) * dir[1]) / axisLen;
+      const stepAt = (occIcon || storable) ? axisLen : axisLen / 2;
+      if (prog <= stepAt) break;
+      path.push(w);
+      v = w;
+    }
+    return { path, folderTarget: null };
+  }
+
+  function updateDragTarget(clientX, clientY) {
+    if (drag.kind === 'folder') {
+      const near = nearestTarget(clientX, clientY);
+      const key = near.dest ? `${near.dest.x},${near.dest.y}` : 'start';
+      // 対象が変わったときだけ描き直す（アイコン版と同じ）。毎 move で
+      // 盤面を再構築すると、滑走中アイコンの実測位置がずれて蓄積し、
+      // 表示が崩れる・残像が出る原因になる（2026-11-10 ユーザー報告）
+      if (drag.targetKey === key) return;
+      drag.targetKey = key;
+      drag.target = near.dest;
+      renderFolderPreview();
+      return;
+    }
+    const plan = computeDragPlan(clientX, clientY);
+    const landing = plan.folderTarget || plan.path[plan.path.length - 1] || null;
+    const key = plan.folderTarget
+      ? `F${plan.folderTarget.x},${plan.folderTarget.y}|${plan.path.map(c => c.x + ',' + c.y).join(';')}`
+      : (plan.path.length ? `P${plan.path.map(c => c.x + ',' + c.y).join(';')}` : 'start');
+    if (drag.targetKey === key) return;
+    drag.targetKey = key;
+    drag.path = plan.path;
+    drag.folderTarget = plan.folderTarget;
+    drag.target = landing;
+    drag.phase = plan.folderTarget ? 'standby' : (plan.path.length ? 'swap' : null);
+    drag.intent = plan.folderTarget ? 'merge' : 'swap';
+    renderDragPreview();
+  }
+
+  // 「重ねる」の開始条件は updateDragTarget（computeDragPlan）が決める：
+  // 重ねられる相手の中心付近に重ねた段階で待機に入る（静止は条件に
+  // しない）。待機の提示と確定／キャンセルの意味は renderDragPreview と
+  // finishPointer のコメントを参照（2026-11-10 ユーザー最終仕様）
+
+  // 「重ねる」対象のマスに台座を描く（対象マスへの装飾）
   function decorateDragTarget() {
     if (!drag || !drag.target) return;
     if (drag.intent !== 'merge') return;
@@ -301,128 +431,6 @@
     cell.classList.add('merge-target');
   }
 
-  // ホールド（ドウェル）の後始末
-  function resetDwell() {
-    if (!drag) return;
-    if (drag.dwellTimer) { clearTimeout(drag.dwellTimer); drag.dwellTimer = null; }
-    drag.dwellDest = null;
-  }
-
-  // フォルダをドラッグ中のプレビュー： 対象マスにフォルダが移り、
-  // そこにいたアイコン／フォルダはドラッグ元のマスへ滑る（入れ替えの提示）
-  function renderFolderPreview() {
-    const tx = drag.target ? drag.target.x : null;
-    const ty = drag.target ? drag.target.y : null;
-    let icons = state.icons;
-    if (drag.target) {
-      const icon = icons.find(i => i.x === tx && i.y === ty);
-      if (icon) icons = icons.map(i => (i.id === icon.id ? { ...i, x: drag.fromX, y: drag.fromY } : i));
-    }
-    const folders = [];
-    for (const f0 of state.folders) {
-      if (f0.id === drag.folderId) {
-        if (drag.target) folders.push({ ...f0, x: tx, y: ty });
-      } else if (drag.target && f0.x === tx && f0.y === ty) {
-        folders.push({ ...f0, x: drag.fromX, y: drag.fromY });
-      } else folders.push(f0);
-    }
-    flipRender(icons, null, folders);
-  }
-
-  function updateDragTarget(clientX, clientY) {
-    if (drag.kind === 'folder') {
-      const near = nearestTarget(clientX, clientY);
-      const key = near.dest ? `${near.dest.x},${near.dest.y}` : 'start';
-      if (drag.targetKey !== key) { drag.targetKey = key; drag.target = near.dest; }
-      renderFolderPreview();
-      return;
-    }
-    const near = nearestTarget(clientX, clientY);
-    const key = near.dest ? `${near.dest.x},${near.dest.y}` : 'start';
-    if (drag.targetKey === key) return;
-    drag.targetKey = key;
-    drag.target = near.dest;
-    resetDwell();
-    drag.stillX = null; drag.stillY = null;
-    // offer は「重ねられる相手」のときだけ。重ねられない相手は最初から
-    // 入れ替え確定（対象はすぐ滑る）
-    drag.phase = near.dest
-      ? (E.moveIntents(state, drag.iconId, near.dest.x, near.dest.y).includes('merge') ? 'offer' : 'swap')
-      : null;
-    drag.nearD = null; // 中心への最接近点は trackDwell が記録する
-    drag.intent = 'swap'; // すぐ離せば入れ替え。中心で静止すると「重ねる」に切り替わる
-    renderDragPreview();
-  }
-
-  // 「重ねる」の成立条件（実機 iOS のホーム画面の仕様に倣う。2026-11-10 調査：
-  // Apple 公式は並び替えを「別の場所へドラッグ」、フォルダ作成を「別のアプリの
-  // 上へドラッグ」と定義し、解説では (1) ドラッグ中のアイコンが動いている間に
-  // 対象へ到達すると移動として扱われアイコンが避ける、(2) フォルダ化は対象の
-  // 「中心」の上で指を静止させたときだけ、とされている）：
-  // 静止の判定は「ポインターイベントが止んでから DWELL_MS 経つこと」とする。
-  // 実ブラウザ検証で判明した失敗：許容範囲（12px）内の微動は静止とみなす方式
-  // では、狙いを定める指の震え（±数px）でもタイマーが満了し、「入れ替えた後に
-  // フォルダが作られる」問題が再現した。指が動いている限りイベントは届き続け
-  // るので、そのたびにタイマーを仕切り直せば、完全に止めたときだけ成立する。
-  // 成立後に大きく動かせば解除される（実機で対象から外す操作に相当）
-  function trackDwell(clientX, clientY) {
-    if (!drag || drag.kind !== 'icon' || !drag.active) return;
-    drag.lastX = clientX; drag.lastY = clientY;
-    const dest = drag.target;
-    const stackable = !!dest && E.moveIntents(state, drag.iconId, dest.x, dest.y).includes('merge');
-    if (!stackable) { resetDwell(); syncGhostArming(); return; }
-    const rect = boardEl.getBoundingClientRect();
-    const cw = rect.width / state.cols, ch = rect.height / state.rows;
-    const cx = rect.left + (dest.x + 0.5) * cw;
-    const cy = rect.top + (dest.y + 0.5) * ch;
-    const centered = Math.abs(clientX - cx) <= cw * CENTER_RATIO && Math.abs(clientY - cy) <= ch * CENTER_RATIO;
-    if (drag.intent === 'merge') {
-      // 成立後：中心を外れるか、成立位置から大きく動いたら解除する。
-      // それ以外の微動では成立を保つ
-      if (!centered || Math.hypot(clientX - drag.engageX, clientY - drag.engageY) > STILL_PX) {
-        drag.intent = 'swap';
-        drag.phase = 'swap';
-        renderDragPreview();
-      } else return;
-    }
-    if (drag.phase !== 'offer') { resetDwell(); syncGhostArming(); return; }
-    // 中心への最接近点を記録する。中心へ近づく動き（到着の動作）は確定に
-    // 数えず、最接近点から離れる動き（位置の調整・行き過ぎ）だけが対象を
-    // 入れ替えで確定させる。一度確定したら、その対象の上ではどれだけ
-    // 止まってもフォルダ化しない（実機で、ずれた後のマスは「空き位置」
-    // であり重ねる対象ではない）
-    const distC = Math.hypot(clientX - cx, clientY - cy);
-    if (drag.nearD === null || distC < drag.nearD) {
-      drag.nearD = distC; drag.nearX = clientX; drag.nearY = clientY;
-    }
-    if (Math.hypot(clientX - drag.nearX, clientY - drag.nearY) > COMMIT_PX) {
-      drag.phase = 'swap';
-      resetDwell();
-      renderDragPreview();
-      syncGhostArming();
-      return;
-    }
-    if (!centered) { resetDwell(); syncGhostArming(); return; }
-    // 到着したまま中心で静止している：イベントが来るたびにタイマーを仕切り直す
-    startStillTimer(dest);
-  }
-
-  function startStillTimer(dest) {
-    resetDwell();
-    drag.dwellDest = dest;
-    drag.dwellTimer = setTimeout(() => {
-      if (!drag || drag.dwellDest !== dest) return;
-      drag.dwellTimer = null;
-      drag.intent = 'merge';
-      drag.engageX = drag.lastX; drag.engageY = drag.lastY;
-      renderDragPreview();
-    }, DWELL_MS);
-    syncGhostArming();
-  }
-
-  function syncGhostArming() {
-    if (drag && drag.ghost) drag.ghost.classList.toggle('arming', drag.intent !== 'merge' && !!drag.dwellTimer);
-  }
   // ゴーストは残らず消す（過去の取り残しも含めて全部）
   function removeGhost() {
     document.querySelectorAll('.drag-ghost').forEach(g => g.remove());
@@ -432,7 +440,6 @@
   // ドラッグを中断して盤面を元の表示に戻す（異常終了時の後始末）
   function cancelDrag() {
     const wasActive = drag && drag.active;
-    resetDwell();
     removeGhost();
     drag = null;
     press = null;
@@ -455,7 +462,7 @@
     const icon = E.iconAt(state, pos.x, pos.y);
     if (!icon) {
       // フォルダはドラッグで動かせる（スマホ準拠。2026-11-10 ユーザー訂正）。
-      // 動かさずに離せばタップとして、解除の提示フロー（handleTap）へ回る
+      // 動かさずに離せばタップとして、開くフロー（handleTap）へ回る
       const folder = E.folderAt(state, pos.x, pos.y);
       if (!folder) return;
       drag = {
@@ -464,7 +471,7 @@
         active: false, ghost: null,
         dests: E.destinationsForFolder(state, folder.id),
         target: null, targetKey: 'start',
-        intent: 'swap', dwellTimer: null, dwellDest: null, stillX: null, stillY: null,
+        intent: 'swap',
       };
       try { boardEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
       e.preventDefault();
@@ -480,15 +487,14 @@
       render(state.icons, null);
       return;
     }
-    // 候補マスの集合は intent によらず共通（解決の仕方だけが変わる）ため、
-    // 既定（merge）の候補を位置の一覧として使う
-    const dests = E.destinations(state, icon.id);
-    if (dests.length === 0) return;
+    // 入れ替えは自分の方向に縛られない（経路方式）ため、移動候補（方向の
+    // レイ）が無くてもドラッグは開始できる。到達可能性は計画側が決める
     drag = {
       kind: 'icon', iconId: icon.id, fromX: pos.x, fromY: pos.y,
       startX: e.clientX, startY: e.clientY, pointerId: e.pointerId,
-      active: false, ghost: null, dests, target: null, targetKey: 'start',
-      intent: 'swap', dwellTimer: null, dwellDest: null, stillX: null, stillY: null, phase: null, nearX: 0, nearY: 0, nearD: null,
+      active: false, ghost: null, path: [], folderTarget: null,
+      target: null, targetKey: 'start',
+      intent: 'swap', phase: null,
     };
     // タップ選択はここでは消さない（離したときにタップとして処理するため）。
     // 実際にドラッグが始まった時点で、pointermove 側で選択を解除する
@@ -504,7 +510,6 @@
       if (Math.hypot(dx, dy) < 8) return;
       drag.active = true;
       tapSel = null; // ドラッグが始まったらタップ選択は解除する
-      armedFolderId = null;
       // ゴーストは盤面のアイコン／フォルダそのもののコピーにして、大きさが
       // 変わらないようにする。盤面用サイズはマス基準（cqw）で決まっているため、
       // 実測したピクセル値を写す
@@ -567,19 +572,18 @@
     drag.ghost.style.left = e.clientX + 'px';
     drag.ghost.style.top = e.clientY + 'px';
     updateDragTarget(e.clientX, e.clientY);
-    trackDwell(e.clientX, e.clientY);
   });
 
   function finishPointer(cancelled) {
     if (!drag) return;
     const wasActive = drag.active;
     const target = drag.target;
-    const intent = drag.intent;
     const iconId = drag.iconId;
     const kind = drag.kind;
     const folderId = drag.folderId;
+    const path = drag.path || [];
+    const folderTarget = drag.folderTarget || null;
     const fromCell = { x: drag.fromX, y: drag.fromY };
-    resetDwell();
     removeGhost();
     drag = null;
     if (!wasActive) {
@@ -587,9 +591,14 @@
       if (!cancelled) handleTap(fromCell);
       return;
     }
-    if (!cancelled && target) {
-      if (kind === 'folder') E.applyFolderMove(state, folderId, { x: target.x, y: target.y });
-      else E.applyMove(state, iconId, { x: target.x, y: target.y, intent });
+    if (!cancelled && kind === 'folder' && target) {
+      E.applyFolderMove(state, folderId, { x: target.x, y: target.y });
+      render(state.icons, null);
+    } else if (!cancelled && kind === 'icon' && (path.length || folderTarget)) {
+      // 経路方式で確定する。フォルダ化の待機中に離せば、経路の手前まで
+      // 進んで対象へ重なる（フォルダ化）。経路の途中で離せば、そこまでの
+      // 入れ替えがそのまま結果になる
+      E.applyPathMove(state, iconId, path, folderTarget);
       render(state.icons, null);
     } else {
       flipRender(state.icons, null); // 元の位置へ滑って戻る
@@ -656,23 +665,15 @@
   // タップ1回の処理。pos はタップされたマス
   function handleTap(pos) {
     if (state.status !== 'playing') return;
-    // フォルダのマス: 1回目のタップで解除の提示（拡大＋揺れ）、
-    // 2回目で確定して中身を周囲の空きマスへ出す。空きが足りない場合は
-    // 解除できず、提示のままになる（暫定仕様。FOLDER.md）
+    // フォルダのマス: タップでフォルダが開く（スマホ準拠。中身が大きく
+    // 表示され、中身をタップすると盤面へ出る。開く画面まわりは
+    // openFolderSheet のコメントを参照）
     const folder = E.folderAt(state, pos.x, pos.y);
     if (folder) {
       tapSel = null;
-      if (armedFolderId === folder.id) {
-        const r = E.applyFolderRelease(state, folder.id);
-        if (r.ok) armedFolderId = null;
-      } else {
-        armedFolderId = folder.id;
-      }
-      render(state.icons, null);
+      openFolderSheet(folder.id);
       return;
     }
-    const wasArmed = armedFolderId !== null;
-    armedFolderId = null; // それ以外の場所をタップしたら提示は解除される
     const icon = E.iconAt(state, pos.x, pos.y);
     if (tapSel) {
       const sel = state.icons.find(i => i.id === tapSel);
@@ -701,7 +702,6 @@
       return;
     }
     if (icon && icon.z === 0 && icon.mood !== 'rebel') selectIcon(icon.id);
-    else if (wasArmed) render(state.icons, null);
   }
 
   // 壁紙：デフォルトはプリセット13番。プレイヤーは用意された壁紙か自分の写真を選べる。
@@ -853,6 +853,65 @@
   }
   applyWallpaper();
 
+  // フォルダを開く画面（スマホ準拠：タップでフォルダが画面いっぱいに
+  // 開き、中身が実物大で並ぶ。背景はぼかして暗くする）。
+  // - 中身をタップ → そのアイコンが盤面へ出る（取り出し。移動として
+  //   数えない）。残り1個になると最後の1個も出てフォルダは消える
+  // - パネルの外側をタップ → 閉じる（何も起きない）
+  // 開いている間はシートが盤面全体を覆うので、盤面の操作は届かない
+  const folderSheet = document.getElementById('folderSheet');
+  const folderOpenGrid = document.getElementById('folderOpenGrid');
+  const folderNameEl = document.getElementById('folderName');
+  // フォルダ名はカテゴリで決まる（スマホでフォルダ名が付くのと同じ考え方）
+  function folderDisplayName(folder) {
+    const cat = folder.category;
+    if (!cat) return '';
+    if (cat.kind === 'type') return E.TYPES[cat.type].name;
+    if (cat.kind === 'cross') return '十字';
+    if (cat.kind === 'diagonal') return 'ナナメ';
+    return '多様性';
+  }
+  function openFolderSheet(folderId) {
+    openFolderId = folderId;
+    renderFolderSheet();
+    folderSheet.hidden = false;
+  }
+  function closeFolderSheet() {
+    openFolderId = null;
+    folderSheet.hidden = true;
+  }
+  function renderFolderSheet() {
+    const folder = (state.folders || []).find(f => f.id === openFolderId);
+    if (!folder) { closeFolderSheet(); return; }
+    folderNameEl.textContent = folderDisplayName(folder);
+    // 中身の大きさは盤面のマス実寸に合わせる（マスが container になり、
+    // アイコンの cqw 寸法がそのまま効く）
+    const cellRect = boardEl.querySelector('.cell').getBoundingClientRect();
+    folderOpenGrid.innerHTML = '';
+    for (const m of folder.members) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'folder-open-item';
+      item.dataset.memberId = m.id;
+      item.style.width = cellRect.width + 'px';
+      item.style.height = cellRect.height + 'px';
+      item.innerHTML = `<div class="icon-stack"><div class="app-icon ${E.TYPES[m.type].colorName} normal">${iconArtwork(E.TYPES[m.type])}</div></div>`;
+      folderOpenGrid.appendChild(item);
+    }
+  }
+  folderSheet.addEventListener('pointerdown', (e) => {
+    if (!e.target.closest || !e.target.closest('.folder-panel')) closeFolderSheet();
+  });
+  folderOpenGrid.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('.folder-open-item');
+    if (!btn || openFolderId === null) return;
+    const r = E.applyFolderExtract(state, openFolderId, Number(btn.dataset.memberId));
+    if (!r.ok) return;
+    render(state.icons, null);
+    if (r.dissolved) closeFolderSheet();
+    else renderFolderSheet();
+  });
+
   // 設定アプリ：開くと項目が並び、「初期化」でゲームを最初からにする
   const settingsSheet = document.getElementById('settingsSheet');
   document.getElementById('wallpaperBtn').addEventListener('click', () => {
@@ -913,7 +972,7 @@
   document.getElementById('initBtn').addEventListener('click', () => {
     resetWinOverlay();
     state = E.createGame();
-    if (drag) { resetDwell(); removeGhost(); drag = null; }
+    if (drag) { removeGhost(); drag = null; }
     press = null;
     tapSel = null;
     settingsSheet.hidden = true;

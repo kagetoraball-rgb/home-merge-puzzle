@@ -155,6 +155,29 @@ function cloneIcons(icons) { return icons.map(i => ({ ...i })); }
  * - 異種: 相手と入れ替わる（押し出しはしない。入れ替わった相手は眠らない）
  * 戻り値: { icons, resultId, merged, swapped } | null（移動不可）
  */
+// 通過で自分のマスに重なって残っている同種を、経路の後方へ1マスずつ
+// ずらして自分のマスを空ける（フォルダ版の unshare と同じ考え方。
+// 2026-11-11 の同期監査で、メインにも同じ塞がりがあったため移植）。
+// 後方に同種が連なっていれば、最初の空きマスまで連鎖でずらす。
+// 後方が盤面外・予約マス・異種で詰まっていれば false（入れ替え不可）。
+function unshareMain(work, mover, dir, cols, rows) {
+  const sharer = work.find(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y);
+  if (!sharer) return true;
+  const chain = [sharer];
+  let cx = mover.x - dir[0], cy = mover.y - dir[1];
+  for (;;) {
+    if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) return false;
+    if (isReservedCell(cx, cy)) return false;
+    const occ = work.find(i => i.id !== mover.id && i.x === cx && i.y === cy);
+    if (!occ) break;
+    if (occ.id !== sharer.id && occ.type !== sharer.type) return false;
+    chain.push(occ);
+    cx -= dir[0]; cy -= dir[1];
+  }
+  for (const icon of chain) { icon.x -= dir[0]; icon.y -= dir[1]; }
+  return true;
+}
+
 // 盤面サイズを明示して1歩試す本体
 function tryStepOnBoard(work, mover, dir, board, isFinal, intent) {
   const cols = board ? board.cols : 4;
@@ -179,15 +202,15 @@ function tryStepOnBoard(work, mover, dir, board, isFinal, intent) {
       return { icons: rest, resultId: target.id, merged: true };
     }
     // intent='swap': 同種・同数でも合体せず入れ替わる（下の入れ替え処理へ合流）。
-    // ただし通過直後で自分のマスに同種が残っている場合は入れ替われない
-    if (work.some(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y)) return null;
+    // 通過直後で自分のマスに同種が残っていても、後方へずらして空けてから入れ替わる
+    if (!unshareMain(work, mover, dir, cols, rows)) return null;
     target.x = mover.x; target.y = mover.y;
     mover.x = nx; mover.y = ny;
     return { icons: work, resultId: mover.id, merged: false, swapped: true };
   }
   // 異種、または同種でも数が違う場合: 常に入れ替わる（押し出しはしない）
-  // ただし、通過直後で自分のマスに同種が残っている場合は入れ替われない（重なってしまうため）
-  if (work.some(i => i.id !== mover.id && i.x === mover.x && i.y === mover.y)) return null;
+  // 通過直後で自分のマスに同種が残っていても、後方へずらして空けてから入れ替わる
+  if (!unshareMain(work, mover, dir, cols, rows)) return null;
   target.x = mover.x; target.y = mover.y;
   mover.x = nx; mover.y = ny;
   return { icons: work, resultId: mover.id, merged: false, swapped: true };

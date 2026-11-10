@@ -416,9 +416,9 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
      背面にフォルダ風の台座が開いて、対象が少し大きくなって「受け入れる」
      見た目になる。ゴーストも吸い付くように一段と縮む（.sucked） */
 .merge-pedestal {
-  position: absolute; inset: -5cqw; z-index: -1; pointer-events: none;
-  border-radius: 27cqw;
-  opacity: 1; transform: scale(1.05);
+  position: absolute; inset: 8cqw 4cqw; z-index: -1; pointer-events: none;
+  border-radius: 22cqw;
+  opacity: 1;
   background: rgba(243, 243, 247, .72);
   box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .7), 0 5px 16px rgba(0, 0, 0, .18);
 }
@@ -430,28 +430,48 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 /* タップ操作（副操作）：選択中のアイコンの目印（選択肢は出さず自動判定） */
 .icon-stack.selected .app-icon { outline: 3px solid var(--purple); outline-offset: 2px; }
 
-/* フォルダ（フォルダ版ブランチ）：中身のミニアイコンを並べたタイル。
-   解除の提示中は拡大して小刻みに揺れる（実機の編集モード風） */
+/* フォルダ（フォルダ版ブランチ）：中身のミニアイコンを並べたタイル */
 .folder-stack { position: relative; z-index: 1; display: grid; place-items: center; width: 100cqw; height: 100cqw; }
 .folder-tile {
-  width: 88cqw; height: 92cqw; border-radius: 24cqw;
+  width: 76cqw; height: 80cqw; border-radius: 20cqw;
   background: rgba(243, 243, 247, .55);
   box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .65), 0 4px 12px rgba(0, 0, 0, .15);
   display: grid; place-items: center;
 }
-.folder-minis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4cqw; width: 70cqw; }
-.folder-tile .app-icon.mini { width: 20cqw; height: 21cqw; border-radius: 6cqw; animation: none; }
+.folder-minis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 3cqw; width: 60cqw; }
+.folder-tile .app-icon.mini { width: 18cqw; height: 19cqw; border-radius: 5cqw; animation: none; }
 .folder-tile .app-icon .arrow { font-size: 11cqw; }
 .folder-tile .app-icon .face, .folder-tile .app-icon .rebel-mark { display: none; }
-.folder-stack.armed .folder-tile {
-  background: rgba(243, 243, 247, .8);
-  animation: folder-jiggle .16s ease-in-out infinite alternate;
-}
-@keyframes folder-jiggle {
-  from { transform: scale(1.13) rotate(-1.4deg); }
-  to { transform: scale(1.13) rotate(1.4deg); }
-}
 .cell.merge-target .folder-stack { transform: scale(1.1); transition: transform .15s ease; }
+
+/* フォルダを開く画面（スマホ準拠：背景をぼかして暗くし、中身が実物大で
+   並んだパネルが画面にアップされる。パネルの外側をタップで閉じる） */
+.folder-sheet {
+  position: absolute; inset: 0; z-index: 45;
+  display: grid; place-items: center;
+  background: rgba(18, 18, 28, .30);
+  backdrop-filter: blur(16px) saturate(1.5);
+  -webkit-backdrop-filter: blur(16px) saturate(1.5);
+}
+.folder-sheet[hidden] { display: none; }
+.folder-open-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.folder-name {
+  color: #fff; font-size: 21px; font-weight: 700; letter-spacing: .06em;
+  text-shadow: 0 1px 6px rgba(0, 0, 0, .45);
+}
+.folder-panel {
+  background: rgba(243, 243, 247, .55);
+  border-radius: 30px;
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .6), 0 18px 44px rgba(0, 0, 0, .30);
+  padding: 16px;
+  max-width: 92%;
+}
+.folder-open-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: center; }
+.folder-open-item {
+  container-type: size;
+  background: none; border: 0; padding: 0; cursor: pointer;
+  display: grid; place-items: center;
+}
 
 /* クリア演出：実際のスマホのように画面が落ちて真っ黒になり、
    その後にお祝い表示と再起動ボタンが出る */
@@ -512,10 +532,12 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 .icon-stack .app-icon.sayoku:not(.sleep) .eye, .icon-stack .app-icon.uyoku:not(.sleep) .eye { top: 1.05cqw; }
 .icon-stack .app-icon .sleep-marks { right: -5.3cqw; top: 1cqw; text-shadow: 0 .2cqw #fff; }
-.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 16cqw; }
-.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 13cqw; transform: translateX(-3.2cqw); }
-.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 10cqw; transform: translateX(-6.4cqw); }
-.icon-stack .app-icon.sleep::after { font-size: 19cqw; top: -7.4cqw; right: -3.2cqw; }
+.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 24cqw; }
+.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 20cqw; transform: translateX(-4.8cqw); }
+.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 16cqw; transform: translateX(-9.6cqw); }
+/* 眠りの表示は個数で表す .sleep-marks に一本化する（デザイン抽出側の
+   ::after の単独 z は重なって読みづらいため、こちらで消す） */
+.icon-stack .app-icon.sleep::after { content: none; }
 .icon-stack.selected .app-icon { outline-width: .55cqw; outline-offset: .4cqw; }
 .icon-stack .fuse { border-width: .35cqw; right: -5.3cqw; bottom: -5.3cqw; }
 /* フォルダ内のミニアイコン：矢印は SVG なので、ミニタイルの大きさに
