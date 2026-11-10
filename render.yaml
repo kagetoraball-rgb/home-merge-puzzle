@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: home-merge-puzzle
+    env: static
+    buildCommand: ""
+    staticPublishPath: main
+  - type: web
+    name: home-merge-puzzle-folder
+    env: static
+    buildCommand: ""
+    staticPublishPath: folder

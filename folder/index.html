@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ホーム画面合体パズル（試作）</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="phone">
+  <div class="statusbar">
+    <span class="status-left" id="clockText">--:--</span>
+    <span class="notch" aria-hidden="true"></span>
+    <span class="status-right">
+      <span id="statusText"></span>
+      <span class="battery" aria-hidden="true"><span class="battery-body"><span id="batteryFill"></span></span><span class="battery-cap"></span></span>
+      <span id="batteryText">100%</span>
+    </span>
+  </div>
+
+  <div class="board-wrap">
+    <div id="board" aria-label="ホーム画面"></div>
+  </div>
+
+  <div class="settings-sheet" id="settingsSheet" hidden>
+    <div class="settings-head">
+      <button id="settingsBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">設定</span>
+    </div>
+    <div class="settings-list">
+      <button id="wallpaperBtn" class="settings-item" type="button">壁紙の変更</button>
+      <button id="initBtn" class="settings-item danger" type="button">初期化</button>
+    </div>
+    <input id="wallpaperInput" type="file" accept="image/*" hidden>
+  </div>
+
+  <div class="wallpaper-sheet" id="wallpaperSheet" hidden>
+    <div class="settings-head">
+      <button id="wallpaperBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">壁紙の変更</span>
+    </div>
+    <div class="settings-list">
+      <button id="wallpaperPhotoBtn" class="settings-item" type="button">写真から選ぶ</button>
+      <button id="wallpaperDefaultBtn" class="settings-item" type="button">デフォルトに戻す</button>
+    </div>
+    <p class="wallpaper-group-title">用意された壁紙から選ぶ</p>
+    <div class="wallpaper-grid" id="wallpaperGrid"></div>
+  </div>
+
+  <div class="search-sheet" id="searchSheet" hidden>
+    <div class="settings-head">
+      <button id="searchBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">検索</span>
+    </div>
+
+    <div id="searchHome">
+      <div class="search-bar" id="searchBar" role="button" aria-label="検索バー">
+        <span class="search-bar-icon" aria-hidden="true">🔍</span>
+        <span class="search-bar-text">検索</span>
+      </div>
+      <div class="search-suggestions" id="searchSuggestions" hidden>
+        <button class="suggestion" type="button" data-page="howto"><span aria-hidden="true">🔍</span>遊び方</button>
+        <button class="suggestion" type="button" data-page="icons"><span aria-hidden="true">🔍</span>方向アイコン</button>
+      </div>
+    </div>
+
+    <div id="pageHowto" hidden>
+      <button class="page-back" type="button" data-back>‹ 検索に戻る</button>
+      <h2 class="page-title">遊び方</h2>
+      <div class="howto-list">
+        <section class="howto-item"><h3>目的</h3><p>バッテリーが0%になるまで生き残ればクリア。使えるマスが全部埋まるとゲームオーバーです。</p></section>
+        <section class="howto-item"><h3>動かし方</h3><p>アイコンをドラッグして動かします。動けるのは、そのアイコンの矢印の方向だけで、距離は全アイコン1マスです。タップで選んで、行き先をタップしても動かせます（その場合は入れ替え・移動だけが起きて、フォルダにはなりません）。</p></section>
+        <section class="howto-item"><h3>フォルダ</h3><p>アイコンを別のアイコンに「重ねる」と、2個でフォルダができます。ドラッグで重ねたまま少し待つと、相手の後ろに台座が開いて「重ねる」に切り替わります。フォルダの種類（カテゴリ）は最初の2個で決まります。同種同士はその種類だけ、タテ+ヨコは十字（タテ・ヨコだけ）、サヨク+ウヨクはナナメ（サヨク・ウヨクだけ）、それ以外は多様性（全種類OKですが同じ種類は2個入らず、最大4個まで）。</p></section>
+        <section class="howto-item"><h3>フォルダのきまり</h3><p>フォルダもドラッグで動かせます（まわりの8マスへ1マス。アイコンや別のフォルダと位置が入れ替わり、1手として数えます）。ただし、フォルダが動いてアイコンを取り込むことはしません。カテゴリに合わないアイコンを重ねても、収納されず入れ替えになります。フォルダをタップすると少し大きくなって揺れだすので、もう一度タップすると中身が周りの空きマスに出ます（空きが足りないときは出せません）。中に入っている間、アイコンは眠りも機嫌も進みません。</p></section>
+        <section class="howto-item"><h3>入れ替え</h3><p>アイコン同士は、ぶつかると位置が入れ替わります。押し出すことはありません。フォルダではなく入れ替えにしたいときは、ドラッグで重ねてすぐ離してください。フォルダとも入れ替えできます。</p></section>
+        <section class="howto-item"><h3>眠り</h3><p>自分で動いたアイコンは、動いたマス数だけ眠ります（最大3）。眠っている間は自分では動けませんが、入れ替えで動かすことはできます。眠りは、ほかのアイコンが動くたびに1ずつ進みます。</p></section>
+        <section class="howto-item"><h3>機嫌</h3><p>目覚めたときに機嫌が抽選されます。通常は指示どおりに動きます。やる気は1回だけ眠らずに動けます。通常のまま長く放置すると、反抗しやすくなります。</p></section>
+        <section class="howto-item"><h3>反抗</h3><p>反抗中のアイコンは、つかんだ瞬間に自分の方向へランダムに動いてしまいます。運ぶことはできません。</p></section>
+        <section class="howto-item"><h3>インストール</h3><p>2回動くごとに、新しいアイコンが1個入ってきます。入る場所は、空きマスの中で読み順（左上から右へ、下の行へ）が一番早いマスです。</p></section>
+        <section class="howto-item"><h3>アプリ</h3><p>一番下の段には設定と検索のアプリがあります。設定からは初期化、検索からはこの遊び方や方向アイコンの一覧が見られます。</p></section>
+      </div>
+    </div>
+
+    <div id="pageIcons" hidden>
+      <button class="page-back" type="button" data-back>‹ 検索に戻る</button>
+      <h2 class="page-title">方向アイコン</h2>
+      <div class="icon-list" id="iconList"></div>
+    </div>
+  </div>
+
+  <div class="win-overlay" id="winOverlay" hidden>
+    <div class="win-message">
+      <p class="win-title">クリアおめでとう！</p>
+      <button id="restartBtn" class="win-restart" type="button">再起動</button>
+    </div>
+  </div>
+</div>
+<script src="engine.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

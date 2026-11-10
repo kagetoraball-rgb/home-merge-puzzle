@@ -1,0 +1,527 @@
+/* ============================================================
+   ごきげんサバイバル（~/workspace/gokigen-survival/style.css）から
+   「コードのまま」機械抽出したデザインルール。
+   対象: :root / body / header / 盤面 / .app-icon と顔・機嫌まわり /
+   .icon-stack / .mood / .card-name / .planner / .primary / .feed など。
+   手で書き直した値は入れていない。抽出条件に当たらない祖先セレクタ
+   （#gameArea 配下など）のルールは落としてある。
+   ============================================================ */
+:root {--ink:#252537;--muted:#85838b;--paper:#f6f5f0;--purple:#7862d9;--line:#e8e6e0;--orange:#e98a52;--blue:#5598c4;--green:#7b9b65}
+body {margin:0;background:var(--paper);color:var(--ink);font-family:-apple-system,BlinkMacSystemFont,'Hiragino Sans','Yu Gothic',sans-serif;font-size:14px}
+header {max-width:1380px;margin:auto;padding:25px 38px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}
+.eyebrow {font-size:10px;letter-spacing:2px;font-weight:800;color:var(--muted)}
+h1 {font-size:24px;letter-spacing:1px;margin:9px 0 0}
+.turn {border-left:1px solid #d8d5cf;padding-left:22px;display:flex;flex-direction:column;align-items:center}
+.turn small {font-size:9px;letter-spacing:2px;color:var(--muted)}
+.turn strong {font-size:39px;line-height:1.2;font-weight:600;font-variant-numeric:tabular-nums}
+.board-wrap {position:relative;border-radius:18px;padding:13px;background:#deded3;border:1px solid #d2d2c6;box-shadow:0 9px 0 #d3d3c7,0 18px 35px #4646230c;max-width:670px;margin:auto}
+#board {display:grid;aspect-ratio:1;gap:2px;overflow:hidden;border-radius:8px;background:#d7d7c9}
+.cell {position:relative;display:grid;place-items:center;background:#eeeee4;min-width:0}
+.cell.check {background:#e4e5d8}
+.fuse {position:absolute;right:-5px;bottom:-5px;background:var(--ink);border:2px solid #eeeee4;color:#fff;border-radius:50%;width:20px;height:20px;display:grid;place-items:center;font-size:11px;font-weight:800}
+.urgent .fuse {background:#df654b}
+.cell.flash {animation:flash .7s ease-out}
+.feed {margin-top:24px;border-top:1px solid var(--line);padding-top:17px;display:flex;gap:19px}
+.feed .eyebrow {white-space:nowrap;padding-top:3px}
+.feed ol {margin:0;padding:0;list-style:none;font-size:11px;color:#8a8791;line-height:1.9;max-height:78px;overflow:auto}
+.feed li:first-child {color:#4c485c}
+.planner {background:#fff;border:1px solid var(--line);border-radius:22px;padding:26px;align-self:start;box-shadow:0 8px 30px #24242403}
+.hint {font-size:11px;color:var(--muted);line-height:1.7;margin:0 0 19px}
+.app-icon {--icon:#7862d9;background:linear-gradient(145deg,color-mix(in srgb,var(--icon),white 17%),var(--icon));border-radius:17px;width:57px;height:60px;box-shadow:inset 0 2px 0 #fff4,inset 0 -4px 0 #0001,0 5px 10px #0001;color:white;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;user-select:none;cursor:grab}
+.app-icon.orange {--icon:var(--orange)}
+.app-icon.blue {--icon:var(--blue)}
+.app-icon.green {--icon:var(--green)}
+.app-icon .arrow {font-size:29px;line-height:1}
+.app-icon .face {font-size:12px;letter-spacing:3px;height:14px;line-height:12px}
+.app-icon.eager {animation:bounce 1s ease-in-out infinite}
+.app-icon.normal {animation:breathe 3s ease-in-out infinite}
+.app-icon.sleep {filter:saturate(.4);animation:sleep 2.8s ease-in-out infinite}
+.app-icon.sleep:after {content:'z';position:absolute;top:-7px;right:-3px;color:#9993b3;font-size:18px;font-weight:700}
+.app-icon.rebel {animation:rebel 1.8s ease-in-out infinite}
+.card-name {font-size:11px;font-weight:700}
+.mood {font-size:9px;padding:3px 5px;border-radius:4px;background:#f1eff5;margin-left:5px;color:#827a96}
+.mood.eager {background:#eff5db;color:#7c9239}
+.mood.rebel {background:#fbe8e3;color:#bd725b}
+.mood.sleep {background:#eaedf5;color:#8a95b3}
+.primary {border:0;background:var(--ink);color:#fff;padding:18px 19px;display:flex;justify-content:space-between;align-items:center;width:100%;border-radius:11px;font-weight:700;font-size:13px;box-shadow:0 4px 0 #171725;margin-top:12px}
+.primary span {color:#d7eea1;font-size:22px;line-height:1}
+.primary:hover:enabled {background:#3c3751}
+.primary:disabled {opacity:.6}
+#message {font-size:11px;color:#9d7257;line-height:1.6;min-height:21px;margin-top:8px}
+.planner {min-width:0}
+.planner {padding:14px}
+.hint {margin-bottom:7px}
+.app-icon {width:48px;height:51px;border-radius:14px}
+.app-icon .arrow {font-size:25px}
+.mood {margin-left:0}
+.primary {padding:13px 12px;margin-top:6px}
+#message {min-height:0;margin-top:5px}
+#message:empty {display:none}
+.feed {margin-top:12px;padding-top:10px}
+.app-icon .face {position:relative;width:25px;height:14px;letter-spacing:0}
+.eye {position:absolute;top:3px;width:3px;height:4px;background:currentColor;border-radius:50%}
+.eye.left {left:5px}
+.eye.right {right:5px}
+.sleep .eye {width:6px;height:1px;top:6px}
+.sleep .eye.left {left:3px}
+.sleep .eye.right {right:3px}
+.app-icon.eager {animation:dock-launch 1.5s ease-in-out infinite;transform-origin:center bottom;will-change:transform}
+.app-icon.normal {animation:distance-bounce 1.8s infinite;transform-origin:50% 100%}
+@media(max-width:850px) {
+header {padding:12px 14px}
+h1 {font-size:17px}
+.turn {padding-left:9px}
+.turn strong {font-size:26px}
+.planner {padding:10px;border-radius:14px}
+.app-icon {width:36px;height:40px;border-radius:11px}
+.app-icon .arrow {font-size:21px}
+.card-name {font-size:10px}
+.mood {font-size:9px}
+.hint {font-size:10px}
+.board-wrap {padding:7px;border-radius:12px}
+.fuse {width:14px;height:14px;font-size:8px;border-width:1px;right:-3px;bottom:-3px}
+.feed {display:block}
+.feed ol {font-size:10px;max-height:70px}
+.primary {font-size:11px}
+.primary span {font-size:17px}
+.app-icon.eager {animation-name:dock-launch-small}
+}
+@media(max-width:500px) {
+header {padding:9px}
+h1 {font-size:12px;letter-spacing:0;max-width:100px;margin:0}
+.turn small {font-size:7px}
+.turn strong {font-size:22px}
+.planner {padding:7px}
+.hint {font-size:9px;line-height:1.4;margin:2px 0 5px}
+.app-icon {width:29px;height:34px;border-radius:9px}
+.app-icon .arrow {font-size:18px}
+.app-icon .face {transform:scale(.85)}
+.card-name {font-size:9px;width:100%}
+.mood {padding:2px 3px;font-size:8px}
+.board-wrap {padding:4px}
+#board {gap:1px}
+.fuse {width:11px;height:11px;font-size:7px;right:-2px;bottom:-2px}
+.primary {font-size:10px;padding:10px 6px}
+#message {font-size:9px}
+.feed .eyebrow {font-size:8px}
+.feed ol {font-size:9px}
+}
+@media(max-width:500px) {
+.feed {margin-top:9px}
+}
+.cell {border:0;padding:0;color:inherit;font:inherit;opacity:1!important;cursor:default;isolation:isolate}
+.cell:disabled {opacity:1;cursor:default}
+.cell.route::after, .cell.destination::after {content:'';position:absolute;inset:0;background:color-mix(in srgb,var(--route),transparent 67%);pointer-events:none;z-index:0}
+.cell.destination {cursor:pointer;box-shadow:inset 0 0 0 2px var(--route)}
+.cell.destination:hover::after, .cell.hover-route::after {background:color-mix(in srgb,var(--route),transparent 38%)}
+.cell.danger-destination {box-shadow:inset 0 0 0 2px #d75c46}
+.cell:focus-visible {outline:3px solid #33225d;outline-offset:-3px;z-index:3}
+.app-icon .arrow {font-family:Arial,'Hiragino Sans',sans-serif}
+@media(max-width:500px) {
+.cell.destination {box-shadow:inset 0 0 0 1px var(--route)}
+}
+.cell {min-height:0;min-width:0;overflow:hidden;appearance:none}
+.planner {padding:10px;border-radius:14px}
+.hint {font-size:10px;line-height:1.5;margin:3px 0 6px}
+.app-icon {width:39px;height:43px;border-radius:12px}
+.app-icon .arrow {font-size:23px}
+.card-name {width:auto;font-size:10px}
+.mood {font-size:9px}
+.primary {padding:10px;margin-top:6px;font-size:12px}
+.primary span {font-size:18px}
+.feed {margin-top:10px;padding-top:8px}
+@media(max-width:850px) {
+.planner {padding:8px}
+.app-icon {width:33px;height:38px;border-radius:10px}
+.app-icon .arrow {font-size:21px}
+}
+@media(max-width:500px) {
+.planner {padding:6px;border-radius:10px}
+.hint {font-size:8px;line-height:1.5;margin:3px 0 5px}
+.app-icon {width:26px;height:31px;border-radius:8px}
+.app-icon .arrow {font-size:17px}
+.app-icon .face {transform:scale(.75)}
+.card-name {width:auto;font-size:8px}
+.mood {font-size:8px}
+.mood {padding:2px}
+.primary {font-size:9px;padding:9px 5px}
+.primary span {font-size:14px}
+.turn strong {font-size:23px}
+h1 {max-width:none;font-size:12px}
+.feed {margin-top:8px;padding-top:7px}
+}
+.welcome>h1, .room-lobby>h1 {font-size:clamp(24px,4vw,36px);margin:10px 0}
+.room-lobby .primary {width:100%;margin:8px 0 14px}
+.start-screen .primary {font-size:14px;padding:13px 14px}
+.start-screen .primary span {font-size:22px}
+.icon-stack {display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0}
+.icon-stack .mood {position:relative;z-index:2;margin:0;font-size:9px;line-height:1.2;white-space:nowrap;padding:2px 4px}
+.icon-stack .card-name {display:block;width:auto;margin:0;text-align:center;white-space:nowrap;font-size:10px;line-height:1.2}
+.icon-stack .app-icon {flex:none;margin:0}
+@media(max-width:850px) {
+.icon-stack .card-name {font-size:9px}
+}
+@media(max-width:500px) {
+.icon-stack {gap:2px}
+.icon-stack .mood {font-size:8px;padding:2px}
+.icon-stack .card-name {font-size:8px}
+}
+.board-wrap {width:100%;max-width:520px;box-sizing:border-box}
+.planner {margin:17px auto 0;padding:12px;max-width:670px;box-sizing:border-box}
+.icon-stack {gap:3px;width:100%}
+.icon-stack .app-icon {width:39px;height:43px}
+.icon-stack .card-name {font-size:10px}
+.icon-stack .mood {font-size:9px}
+.planner .hint {font-size:11px}
+.feed {max-width:670px;margin-left:auto;margin-right:auto}
+@media(max-width:850px) {
+.planner {padding:10px}
+}
+@media(max-width:500px) {
+.planner {margin-top:13px;padding:8px 6px}
+.planner .hint {font-size:10px}
+.icon-stack .app-icon {width:31px;height:36px;border-radius:9px}
+.icon-stack .app-icon .arrow {font-size:19px}
+.icon-stack .card-name {font-size:9px}
+.icon-stack .mood {font-size:8px}
+.board-wrap {max-width:520px}
+}
+.planner {max-width:520px}
+.app-icon.gold {background:linear-gradient(150deg,#e6be6e,#b4863a)}
+.app-icon.rose {background:linear-gradient(150deg,#dca1c1,#ad668f)}
+#board .cell.destination {box-shadow:none}
+#board .prediction-outline {position:absolute;inset:2px;border:2px dashed var(--prediction);z-index:4;pointer-events:none;border-radius:2px}
+.app-icon.cyan {background:linear-gradient(150deg,#79c5cb,#438c9d)}
+#board {position:relative;isolation:isolate}
+#board .cell {isolation:auto}
+#board .board-coin {position:absolute;width:82%;height:82%;z-index:1;pointer-events:none}
+#board .board-bombs {position:absolute;inset:0;overflow:hidden;pointer-events:none}
+#board .large-bomb-slot {position:absolute;display:grid;place-items:center;min-width:0;min-height:0}
+.app-icon .warp-art {display:block;width:100%;height:100%;flex:none;overflow:visible;color:#fff}
+.planner-status-tools {display:flex;align-items:center;gap:9px;flex:none}
+.planner-status-tools {gap:8px}
+.screen-heading h1 {min-width:0;margin:0}
+.room-lobby .screen-heading h1 {font-size:clamp(24px,4vw,36px)}
+.planner-actions {display:flex;gap:5px;flex:0 1 auto;min-width:0;max-width:100%}
+.planner .planner-status-tools {margin-left:auto}
+:root {--ui-space:8px;--ui-touch:44px;--ui-copy:#625b70}
+.primary .coin-amount, .primary .currency-coin {font-size:inherit;color:inherit}
+.planner-content {display:contents}
+#board .cell, #board .cell.destination, #board .cell:focus-visible {z-index:auto;isolation:auto}
+#board .cell.route::after, #board .cell.destination::after {z-index:2}
+#board .board-coin {z-index:3}
+#board .prediction-outline {z-index:5}
+#board .cell:focus-visible {outline:none}
+#board .cell:focus-visible::before {content:'';position:absolute;inset:0;border:3px solid #33225d;z-index:6;pointer-events:none}
+.sleep-marks {position:absolute;right:-5px;top:1px;display:flex;flex-direction:column;align-items:center;color:#625c7c;font-weight:800;line-height:.8;text-shadow:0 1px #fff;pointer-events:none}
+.sleep-marks span:nth-child(1) {font-size:15px}
+.sleep-marks span:nth-child(2) {font-size:12px;transform:translateX(-3px)}
+.sleep-marks span:nth-child(3) {font-size:9px;transform:translateX(-6px)}
+.app-icon .rebel-eyes, .app-icon .warp-rebel-eyes, .app-icon .rebel-mark {display:none}
+.app-icon.rebel .eye, .app-icon.rebel .warp-eyes {display:none}
+.app-icon.rebel :is(.rebel-eyes,.warp-rebel-eyes) {fill:currentColor}
+.app-icon.rebel .rebel-eyes {display:block;width:100%;height:100%}
+.app-icon.rebel .warp-rebel-eyes {display:inline}
+.app-icon.rebel .rebel-mark {display:block;position:absolute;top:-3px;right:-4px;width:14px;height:14px;fill:none;stroke:#a52840;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;filter:drop-shadow(0 0 1px white);pointer-events:none}
+#board .blast-warning {position:absolute;inset:1px;z-index:1;pointer-events:none;border:1px solid #cf6339;background:repeating-linear-gradient(135deg,#e56d4829 0 5px,#e56d4812 5px 10px);border-radius:2px}
+@keyframes bounce {0%,100%{transform:translateY(0) scale(1.02,.97)}45%{transform:translateY(-8px) scale(.98,1.03)}}
+@keyframes breathe {50%{transform:translateY(-2px)}}
+@keyframes sleep {50%{transform:rotate(-5deg) scale(.96)}}
+@keyframes rebel {0%,75%,100%{transform:rotate(-5deg)}80%,90%{transform:rotate(5deg)}85%,95%{transform:rotate(-8deg)}}
+@keyframes flash {0%{background:#ffb75b;box-shadow:0 0 22px #ff9a30}100%{}}
+@keyframes dock-launch {0%,48%,100%{transform:translateY(0) scale(1,1)}12%{transform:translateY(-13px) scale(.96,1.04)}24%{transform:translateY(0) scale(1.08,.92)}34%{transform:translateY(-6px) scale(.98,1.02)}44%{transform:translateY(0) scale(1,1)}}
+@keyframes distance-bounce {0%,65%,100%{transform:translateY(0) scale(1.02,.98);animation-timing-function:cubic-bezier(.2,.65,.35,1)}32%{transform:translateY(calc(-1 * var(--hop))) scale(1,1);animation-timing-function:cubic-bezier(.55,0,.85,.4)}}
+@keyframes dock-launch-small {0%,48%,100%{transform:translateY(0) scale(1,1)}12%{transform:translateY(-13px) scale(.96,1.04)}24%{transform:translateY(0) scale(1.08,.92)}34%{transform:translateY(-6px) scale(.98,1.02)}44%{transform:translateY(0) scale(1,1)}}
+
+/* ============================================================
+   本作用の適応分（ここだけが自前）。
+   ごきげんサバイバルに無い要素だけを、抽出済みトークンで組む。
+   - スマホの形の画面に収める（枠・ステータスバー・縮尺）
+   - バッテリー表示はスマホのステータスバー風（電池アイコン＋％）
+   - 盤面が 4x8 なので #board の列数と、マスに合わせたアイコンの大きさ
+   - 移動候補のハイライト（旧作に無い表示）
+   ============================================================ */
+body { display: flex; align-items: center; justify-content: center; min-height: 100dvh; padding: 10px; }
+
+/* スマホ本体 */
+.phone {
+  height: min(97dvh, 920px);
+  aspect-ratio: 9 / 19.3;
+  max-width: calc(100vw - 16px);
+  display: flex; flex-direction: column;
+  background: var(--paper);
+  border: 9px solid #191921; border-radius: 46px;
+  box-shadow: 0 24px 60px #0003;
+  overflow: hidden;
+  padding: 10px 10px 12px;
+}
+@media (max-width: 480px) {
+  .phone { border-width: 4px; border-radius: 32px; height: 98dvh; }
+}
+
+/* ステータスバー（スマホ風） */
+.statusbar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 2px 8px 9px; font-size: 12.5px; font-weight: 700; color: var(--ink);
+}
+.notch { width: 74px; height: 19px; border-radius: 10px; background: #191921; }
+.status-right { display: inline-flex; align-items: center; gap: 6px; }
+#clockText { font-weight: 700; }
+#statusText { color: #bd725b; }
+.battery { display: inline-flex; align-items: center; gap: 1.5px; }
+.battery-body {
+  width: 25px; height: 12px; padding: 1.5px;
+  border: 1.5px solid #25253780; border-radius: 4px;
+  display: inline-block;
+}
+#batteryFill { display: block; height: 100%; width: 100%; background: #34c759; border-radius: 2px; transition: width .3s; }
+#batteryFill.low { background: #e5484d; }
+.battery-cap { width: 2.5px; height: 5px; background: #25253780; border-radius: 0 2px 2px 0; }
+#batteryText { font-variant-numeric: tabular-nums; }
+
+/* 盤面は残りの高さいっぱいに広げる。盤面の板・マス目は消してあり、
+   アイコンがホーム画面に直接並ぶ見た目にする（格子と操作はそのまま） */
+.board-wrap {
+  flex: 1; min-height: 0; display: flex; max-width: none; margin: 0; width: 100%;
+  background: transparent; border: 0; box-shadow: none; padding: 0; border-radius: 0;
+}
+#board {
+  flex: 1; height: 100%; width: 100%;
+  aspect-ratio: auto;
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-rows: repeat(8, 1fr);
+  background: transparent;
+}
+.cell, .cell.check { background: transparent; }
+.cell { cursor: grab; container-type: size; }
+/* 完全ドラッグ制: 選択や移動範囲の表示はしない（2026-11-09 ユーザー指定） */
+#board { touch-action: none; }
+
+/* アイコンの大きさはマスに追随させる（縮尺が変わっても収まるように）。
+   文字表示が無くなった分、アイコン自体を大きめに取る */
+.icon-stack { height: 100%; justify-content: center; }
+.icon-stack .app-icon { width: 76cqw; height: 80cqw; border-radius: 20cqw; }
+.icon-stack .app-icon .arrow { font-size: 42cqw; }
+.fuse { width: 23cqw; height: 23cqw; font-size: 12cqw; }
+
+/* 設定アプリ（左下の隅に固定）と設定画面 */
+.phone { position: relative; }
+.app-icon.gray { --icon: #8a8a91; }
+.settings-app { border: 0; padding: 0; cursor: pointer; }
+.settings-app .gear { width: 64cqw; height: 64cqw; display: block; }
+.search-app { border: 0; padding: 0; cursor: pointer; }
+.app-icon.search-tile { --icon: #eceef2; }
+.search-app .lens { font-size: 50cqw; line-height: 1; }
+.settings-sheet {
+  position: absolute; inset: 0; z-index: 40;
+  background: var(--paper); display: flex; flex-direction: column;
+  padding: 52px 18px 18px;
+}
+.settings-sheet[hidden] { display: none; }
+.settings-head { display: flex; align-items: center; margin-bottom: 18px; }
+.settings-back {
+  border: 0; background: none; color: var(--purple);
+  font: inherit; font-size: 16px; cursor: pointer; padding: 4px 8px 4px 0;
+}
+.settings-title { font-size: 22px; font-weight: 700; color: var(--ink); margin-left: 6px; }
+.settings-list { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.settings-item {
+  display: block; width: 100%; text-align: left;
+  border: 0; background: none; font: inherit; font-size: 16px;
+  padding: 13px 14px; cursor: pointer; color: var(--ink);
+}
+.settings-item.danger { color: #d75c46; }
+.settings-item + .settings-item { border-top: 1px solid var(--line); }
+
+/* 壁紙（用意された壁紙か、プレイヤーの写真。写真は端末のブラウザ内にだけ保存される）。
+   ステータスバーの文字色は、壁紙の上部の明るさで切り替える（wp-dark = 暗い壁紙） */
+.phone.has-wallpaper { background-size: cover; background-position: center; }
+.phone.wp-dark .statusbar { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
+.phone.wp-dark .battery-body { border-color: #ffffffb3; }
+.phone.wp-dark .battery-cap { background: #ffffffb3; }
+.phone.wp-light .statusbar { text-shadow: 0 1px 2px rgba(255,255,255,.65); }
+
+/* 壁紙の変更画面 */
+.wallpaper-sheet {
+  position: absolute; inset: 0; z-index: 41;
+  background: var(--paper); display: block;
+  padding: 52px 18px 18px; overflow-y: auto;
+}
+.wallpaper-sheet[hidden] { display: none; }
+.wallpaper-group-title { font-size: 14px; font-weight: 700; color: var(--ink); margin: 20px 2px 10px; }
+.wallpaper-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.wallpaper-thumb {
+  border: 2px solid transparent; background: none; padding: 0; cursor: pointer;
+  font: inherit; color: var(--ink);
+}
+.wallpaper-thumb img {
+  width: 100%; aspect-ratio: 9 / 19.3; object-fit: cover;
+  border-radius: 10px; display: block; box-shadow: 0 2px 6px #0002;
+}
+.wallpaper-thumb span { display: block; font-size: 12px; margin-top: 5px; text-align: center; }
+.wallpaper-thumb.current { border-color: transparent; }
+.wallpaper-thumb.current img { outline: 3px solid var(--purple); outline-offset: 1px; }
+
+/* 検索アプリ（設定の横に固定）と検索画面 */
+.search-sheet {
+  position: absolute; inset: 0; z-index: 40;
+  background: var(--paper); display: block;
+  padding: 52px 18px 18px; overflow-y: auto;
+}
+.search-sheet[hidden] { display: none; }
+.search-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: #fff; border: 1px solid var(--line); border-radius: 999px;
+  padding: 12px 18px; cursor: pointer;
+}
+.search-bar-text { color: var(--muted); font-size: 16px; }
+.search-suggestions {
+  margin-top: 14px; background: #fff;
+  border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+}
+.search-suggestions[hidden] { display: none; }
+.suggestion {
+  display: flex; gap: 10px; align-items: center; width: 100%; text-align: left;
+  border: 0; background: none; font: inherit; font-size: 16px;
+  padding: 13px 14px; cursor: pointer; color: var(--ink);
+}
+.suggestion + .suggestion { border-top: 1px solid var(--line); }
+.page-back {
+  border: 0; background: none; color: var(--purple);
+  font: inherit; font-size: 15px; cursor: pointer; padding: 4px 8px 4px 0;
+}
+.page-title { font-size: 20px; margin: 4px 0 14px; color: var(--ink); }
+.howto-list { display: flex; flex-direction: column; gap: 10px; }
+.howto-item { background: #fff; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+.howto-item h3 { margin: 0 0 5px; font-size: 15px; color: var(--ink); }
+.howto-item p { margin: 0; font-size: 14px; line-height: 1.55; color: var(--ink); }
+.icon-list { background: #fff; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.icon-row { display: flex; align-items: center; gap: 14px; padding: 10px 14px; }
+.icon-row + .icon-row { border-top: 1px solid var(--line); }
+.icon-thumb { width: 52px; height: 56px; container-type: size; flex: none; }
+.icon-row-name { font-size: 16px; font-weight: 700; color: var(--ink); }
+.icon-row-desc { font-size: 13px; color: var(--muted); margin-top: 2px; }
+
+.drag-ghost { position: fixed; z-index: 60; pointer-events: none; transform: translate(-50%, -50%); opacity: .96; filter: drop-shadow(0 10px 14px rgba(0,0,0,.3)); }
+.drag-ghost .app-icon { animation: none; }
+
+/* 「重ねる／入れ替え」の選択制（2026-11-10 ユーザー指定）。
+   区別は文字ではなく提示だけで伝える（実機のホーム画面に準拠）。
+   提示は「今離したら何が起きるか」と常に一致させる（順序で区別する）：
+   - 入れ替えの提示: 対象のアイコンがドラッグ元のマスへ滑って避ける。
+     重ねられる相手の上でも、ホールドが成立するまではこちらを見せる
+   - ホールドの進み具合: 持っているアイコン（ゴースト）が成立までの時間かけて
+     少し縮んでいく（.arming）
+   - 重ねるの提示: ホールド成立の瞬間に切り替わる。対象が元のマスへ戻り、
+     背面にフォルダ風の台座が開いて、対象が少し大きくなって「受け入れる」
+     見た目になる。ゴーストも吸い付くように一段と縮む（.sucked） */
+.merge-pedestal {
+  position: absolute; inset: -5cqw; z-index: -1; pointer-events: none;
+  border-radius: 27cqw;
+  opacity: 1; transform: scale(1.05);
+  background: rgba(243, 243, 247, .72);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .7), 0 5px 16px rgba(0, 0, 0, .18);
+}
+.cell.merge-target .icon-stack { transform: scale(1.13); transition: transform .15s ease; }
+.drag-ghost { transition: transform .18s ease; }
+.drag-ghost.arming { transition: transform .35s linear; transform: translate(-50%, -50%) scale(.92); }
+.drag-ghost.sucked { transform: translate(-50%, -50%) scale(.8); }
+
+/* タップ操作（副操作）：選択中のアイコンの目印（選択肢は出さず自動判定） */
+.icon-stack.selected .app-icon { outline: 3px solid var(--purple); outline-offset: 2px; }
+
+/* フォルダ（フォルダ版ブランチ）：中身のミニアイコンを並べたタイル。
+   解除の提示中は拡大して小刻みに揺れる（実機の編集モード風） */
+.folder-stack { position: relative; z-index: 1; display: grid; place-items: center; width: 100cqw; height: 100cqw; }
+.folder-tile {
+  width: 88cqw; height: 92cqw; border-radius: 24cqw;
+  background: rgba(243, 243, 247, .55);
+  box-shadow: inset 0 0 0 1.5px rgba(255, 255, 255, .65), 0 4px 12px rgba(0, 0, 0, .15);
+  display: grid; place-items: center;
+}
+.folder-minis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4cqw; width: 70cqw; }
+.folder-tile .app-icon.mini { width: 20cqw; height: 21cqw; border-radius: 6cqw; animation: none; }
+.folder-tile .app-icon .arrow { font-size: 11cqw; }
+.folder-tile .app-icon .face, .folder-tile .app-icon .rebel-mark { display: none; }
+.folder-stack.armed .folder-tile {
+  background: rgba(243, 243, 247, .8);
+  animation: folder-jiggle .16s ease-in-out infinite alternate;
+}
+@keyframes folder-jiggle {
+  from { transform: scale(1.13) rotate(-1.4deg); }
+  to { transform: scale(1.13) rotate(1.4deg); }
+}
+.cell.merge-target .folder-stack { transform: scale(1.1); transition: transform .15s ease; }
+
+/* クリア演出：実際のスマホのように画面が落ちて真っ黒になり、
+   その後にお祝い表示と再起動ボタンが出る */
+.win-overlay {
+  position: absolute; inset: 0; z-index: 50;
+  background: #000; opacity: 0; transition: opacity .5s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.win-overlay[hidden] { display: none; }
+.win-overlay.on { opacity: 1; }
+.win-message { text-align: center; opacity: 0; transition: opacity .8s ease; padding: 0 20px; }
+.win-overlay.show-msg .win-message { opacity: 1; }
+.win-title { color: #fff; font-size: 26px; font-weight: 700; margin: 0 0 28px; letter-spacing: .02em; }
+.win-restart {
+  border: 1px solid #55565e; background: #232329; color: #fff;
+  font: inherit; font-size: 16px; padding: 12px 34px; border-radius: 999px; cursor: pointer;
+}
+.win-restart:active { background: #34343c; }
+
+/* アイコン内部の寸法系（2026-11-10 ユーザー指示で統一）：
+   端末や画面比率で表示差が出ないよう、アイコン内部は px を使わず、すべて
+   マス幅基準（cqw）で決める。全種類で同じ幾何を使う：
+   - 目の大きさ・間隔・高さは全種類共通。斜めは片目だけが同じ位置に残る
+     （サヨク・ウヨクの眼帯の構図：太い矢印が隅から隅まで張り、下端の
+     矢じりと残る目が下の同じラインにそろう）
+   - 矢印は向きの特徴だけが違い、タイルの中で占める範囲はそろえる
+   - 反抗の目・反抗マーク・眠りのZ・アニメーションの振幅も cqw に統一する */
+.icon-stack .app-icon .arrow { position: absolute; inset: 0; }
+.icon-stack .app-icon .arrow svg {
+  display: block; width: 100%; height: 100%;
+  stroke: #fff; stroke-width: 5; fill: none;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+.icon-stack .app-icon .face {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  /* 幅 39.4cqw：目同士を少し離す（目の中心はタイルの 36.8%／63.2%） */
+  bottom: 13cqw; width: 39.4cqw; height: 10.5cqw;
+}
+.icon-stack .app-icon .eye { width: 4.8cqw; height: 7cqw; top: 1.75cqw; }
+.icon-stack .app-icon .eye.left { left: 7.3cqw; }
+.icon-stack .app-icon .eye.right { right: 7.3cqw; }
+.icon-stack .app-icon.sleep .eye { width: 9cqw; height: 1.7cqw; top: 4.4cqw; }
+.icon-stack .app-icon.sleep .eye.left { left: 5.2cqw; }
+.icon-stack .app-icon.sleep .eye.right { right: 5.2cqw; }
+.icon-stack .app-icon.rebel .rebel-eyes {
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 100%; height: auto;
+}
+.icon-stack .app-icon.rebel .rebel-mark {
+  width: 15cqw; height: 15cqw; top: -3.2cqw; right: -4.2cqw;
+}
+/* 斜め（サヨク・ウヨク）だけの目の調整（2026-11-10 ユーザー確定）：
+   顔全体を 2cqw 上げ、反抗の目をさらに 3.6cqw 上げ、通常の目だけ
+   ほんの少し（0.7cqw）上げる */
+.icon-stack .app-icon.sayoku .face, .icon-stack .app-icon.uyoku .face { bottom: 15cqw; }
+.icon-stack .app-icon.sayoku .rebel-eyes, .icon-stack .app-icon.uyoku .rebel-eyes {
+  transform: translateY(-50%) translateY(-3.6cqw);
+}
+.icon-stack .app-icon.sayoku:not(.sleep) .eye, .icon-stack .app-icon.uyoku:not(.sleep) .eye { top: 1.05cqw; }
+.icon-stack .app-icon .sleep-marks { right: -5.3cqw; top: 1cqw; text-shadow: 0 .2cqw #fff; }
+.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 16cqw; }
+.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 13cqw; transform: translateX(-3.2cqw); }
+.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 10cqw; transform: translateX(-6.4cqw); }
+.icon-stack .app-icon.sleep::after { font-size: 19cqw; top: -7.4cqw; right: -3.2cqw; }
+.icon-stack.selected .app-icon { outline-width: .55cqw; outline-offset: .4cqw; }
+.icon-stack .fuse { border-width: .35cqw; right: -5.3cqw; bottom: -5.3cqw; }
+/* フォルダ内のミニアイコン：矢印は SVG なので、ミニタイルの大きさに
+   そのまま比例して縮む（個別指定は不要） */
+@keyframes bounce { 0%,100% { transform: translateY(0) scale(1.02,.97); } 45% { transform: translateY(-8.5cqw) scale(.98,1.03); } }
+@keyframes breathe { 50% { transform: translateY(-2.1cqw); } }
+@keyframes dock-launch { 0%,48%,100% { transform: translateY(0) scale(1,1); } 12% { transform: translateY(-13.7cqw) scale(.96,1.04); } 24% { transform: translateY(0) scale(1.08,.92); } 34% { transform: translateY(-6.3cqw) scale(.98,1.02); } 44% { transform: translateY(0) scale(1,1); } }
+@keyframes dock-launch-small { 0%,48%,100% { transform: translateY(0) scale(1,1); } 12% { transform: translateY(-13.7cqw) scale(.96,1.04); } 24% { transform: translateY(0) scale(1.08,.92); } 34% { transform: translateY(-6.3cqw) scale(.98,1.02); } 44% { transform: translateY(0) scale(1,1); } }
+@keyframes flash { 0% { background: #ffb75b; box-shadow: 0 0 23cqw #ff9a30; } 100% {} }
