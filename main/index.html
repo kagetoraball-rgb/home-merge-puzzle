@@ -20,6 +20,7 @@
 
   <div class="board-wrap">
     <div id="board" aria-label="ホーム画面"></div>
+    <div class="dock"><div id="dock-grid"></div></div>
   </div>
 
   <div class="settings-sheet" id="settingsSheet" hidden>
@@ -28,6 +29,7 @@
       <span class="settings-title">設定</span>
     </div>
     <div class="settings-list">
+      <button id="soundBtn" class="settings-item" type="button">サウンド</button>
       <button id="wallpaperBtn" class="settings-item" type="button">壁紙の変更</button>
       <button id="initBtn" class="settings-item danger" type="button">初期化</button>
     </div>
@@ -45,6 +47,36 @@
     </div>
     <p class="wallpaper-group-title">用意された壁紙から選ぶ</p>
     <div class="wallpaper-grid" id="wallpaperGrid"></div>
+  </div>
+
+  <div class="sound-sheet" id="soundSheet" hidden>
+    <div class="settings-head">
+      <button id="soundBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">サウンド</span>
+    </div>
+    <div class="settings-list">
+      <button id="soundToggleBtn" class="settings-item" type="button">サウンド：オフ</button>
+      <div class="settings-item settings-volume">
+        <span>BGM音量</span>
+        <input id="bgmVolumeSlider" type="range" min="0" max="100" step="1" value="50" aria-label="BGM音量">
+        <span id="bgmVolumeValue" class="volume-value">50%</span>
+      </div>
+      <div class="settings-item settings-volume">
+        <span>効果音量</span>
+        <input id="seVolumeSlider" type="range" min="0" max="100" step="1" value="50" aria-label="効果音量">
+        <span id="seVolumeValue" class="volume-value">50%</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="store-sheet" id="storeSheet" hidden>
+    <div class="settings-head">
+      <button id="storeBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">ストア</span>
+    </div>
+    <p class="store-coins">コイン：<span id="storeCoins">0</span>枚</p>
+    <div class="settings-list" id="storeList"></div>
+    <p class="store-note">コインは、アイコンを合体させると「できた数」だけもらえます。コインと購入はこのラン限りです。買ったアイコンは、一番手前の空きマスに置かれます。</p>
   </div>
 
   <div class="search-sheet" id="searchSheet" hidden>

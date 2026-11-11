@@ -245,18 +245,36 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 
 /* スマホ本体 */
 .phone {
-  height: min(97dvh, 920px);
-  aspect-ratio: 9 / 19.3;
-  max-width: calc(100vw - 16px);
+  /* スマホの作り（2026-11-11 ユーザー指示）：今までの黒い縁の部分
+     までを画面（壁紙が角まで届く）にして、本体の縁は外側に新しく
+     作る。比率の調整はその外側の縁で行う＝端末全体（縁を含む
+     外形）の比率をそろえる。比率は 17:9（2026-11-11 ユーザーが
+     候補 16:9／17:9／18:9／19.5:9／20:9 から選択）。
+     .phone 自体は「画面」。縁は box-shadow のリング（12px）で
+     外側に描く（レイアウトには影響しない）。画面の幅は
+     盤面＋余白20px、端末の外形は画面＋縁24px。
+     盤面（4列×7段・正方形マス）は上部に置く */
+  --board-w: min(calc(100vw - 64px), calc(min(97dvh, 920px) * 9 / 17 - 44px));
+  box-sizing: border-box;
+  width: calc(var(--board-w) + 20px);
+  height: calc((var(--board-w) + 44px) * 17 / 9 - 24px);
   display: flex; flex-direction: column;
   background: var(--paper);
-  border: 9px solid #191921; border-radius: 46px;
-  box-shadow: 0 24px 60px #0003;
+  border: 0; border-radius: 34px;
+  box-shadow: 0 0 0 12px #131318, 0 24px 60px #0003;
   overflow: hidden;
   padding: 10px 10px 12px;
 }
 @media (max-width: 480px) {
-  .phone { border-width: 4px; border-radius: 32px; height: 98dvh; }
+  /* 狭い画面も同じ作り（縁のリングは 10px に細くする。
+     高さは 98dvh を上限にする） */
+  .phone {
+    border-radius: 28px;
+    box-shadow: 0 0 0 10px #131318, 0 24px 60px #0003;
+    --board-w: min(calc(100vw - 60px), calc(98dvh * 9 / 17 - 40px));
+    width: calc(var(--board-w) + 20px);
+    height: calc((var(--board-w) + 40px) * 17 / 9 - 20px);
+  }
 }
 
 /* ステータスバー（スマホ風） */
@@ -282,15 +300,37 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 /* 盤面は残りの高さいっぱいに広げる。盤面の板・マス目は消してあり、
    アイコンがホーム画面に直接並ぶ見た目にする（格子と操作はそのまま） */
 .board-wrap {
-  flex: 1; min-height: 0; display: flex; max-width: none; margin: 0; width: 100%;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  max-width: none; margin: 0; width: 100%;
   background: transparent; border: 0; box-shadow: none; padding: 0; border-radius: 0;
 }
+/* マスは正方形。盤面グリッドには上の6段だけを置き、最下段の列は
+   画面下部のドック（専用枠）に入れる（2026-11-11 ユーザー指定：
+   ユーザーの実機ホーム画面のドックと同じ作り）。論理上の盤面は
+   4列×7段のまま */
 #board {
-  flex: 1; height: 100%; width: 100%;
-  aspect-ratio: auto;
+  flex: none; width: var(--board-w); height: auto;
+  aspect-ratio: 4 / 6;
   grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  grid-template-rows: repeat(6, 1fr);
   background: transparent;
+}
+/* ドック：画面の下端に置く半透明の専用枠。中身は盤面の最下段
+   （設定・検索の固定アプリ＋右2マス）。マスの大きさは盤面と
+   そろえる（枠は盤面より左右8pxずつ広く、列の位置は盤面と一致） */
+.dock {
+  margin-top: auto; flex: none;
+  width: calc(var(--board-w) + 16px);
+  box-sizing: border-box; padding: 8px;
+  background: #ffffff59;
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  backdrop-filter: blur(8px) saturate(1.4);
+  border-radius: 24px;
+}
+#dock-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  height: calc(var(--board-w) / 4);
+  touch-action: none;
 }
 .cell, .cell.check { background: transparent; }
 .cell { cursor: grab; container-type: size; }
@@ -331,6 +371,9 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   padding: 13px 14px; cursor: pointer; color: var(--ink);
 }
 .settings-item.danger { color: #d75c46; }
+.settings-volume { display: flex; align-items: center; gap: 10px; cursor: default; }
+.settings-volume input[type="range"] { flex: 1; accent-color: #7862d9; }
+.settings-volume .volume-value { min-width: 3.2em; text-align: right; font-size: 14px; color: #8a8a8a; }
 .settings-item + .settings-item { border-top: 1px solid var(--line); }
 
 /* 壁紙（用意された壁紙か、プレイヤーの写真。写真は端末のブラウザ内にだけ保存される）。
@@ -340,6 +383,14 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 .phone.wp-dark .battery-body { border-color: #ffffffb3; }
 .phone.wp-dark .battery-cap { background: #ffffffb3; }
 .phone.wp-light .statusbar { text-shadow: 0 1px 2px rgba(255,255,255,.65); }
+
+/* サウンド画面（壁紙の変更画面と同じ作り） */
+.sound-sheet {
+  position: absolute; inset: 0; z-index: 41;
+  background: var(--paper); display: block;
+  padding: 52px 18px 18px; overflow-y: auto;
+}
+.sound-sheet[hidden] { display: none; }
 
 /* 壁紙の変更画面 */
 .wallpaper-sheet {
@@ -474,15 +525,43 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   transform: translateY(-50%) translateY(-3.6cqw);
 }
 .icon-stack .app-icon.sayoku:not(.sleep) .eye, .icon-stack .app-icon.uyoku:not(.sleep) .eye { top: 1.05cqw; }
-.icon-stack .app-icon .sleep-marks { right: -5.3cqw; top: 1cqw; text-shadow: 0 .2cqw #fff; }
-.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 24cqw; }
-.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 20cqw; transform: translateX(-4.8cqw); }
-.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 16cqw; transform: translateX(-9.6cqw); }
+/* 眠りのZ（2026-11-11 ユーザー採用の V1）：サイズごとに場所を固定した
+   絶対配置。一番小さいZが右目の右（発生地点）に出て、右上へ大きく
+   育ちながら互いにつく。無いサイズの席は詰めない（個数で位置が
+   変わらない）。大 36 / 中 25 / 小 17cqw と段差を広げ、全体を
+   右へ寄せて赤丸バッジの数字に被せない。コンテナはタイル全体 */
+.icon-stack .app-icon .sleep-marks {
+  display: block; left: 0; top: 0; right: auto;
+  width: 76cqw; height: 80cqw; z-index: 4;
+  text-shadow: 0 0 3cqw #fff, 0 0 3cqw #fff, 0 1cqw 2cqw #fff;
+}
+.icon-stack .app-icon .sleep-marks span { position: absolute; }
+.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 36cqw; right: -29.5cqw; bottom: 53cqw; transform: none; }
+.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 25cqw; right: -15.5cqw; bottom: 32cqw; transform: none; }
+.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 17cqw; right: -2.5cqw; bottom: 17.6cqw; transform: none; }
 /* 眠りの表示は個数で表す .sleep-marks に一本化する（デザイン抽出側の
    ::after の単独 z は重なって読みづらいため、こちらで消す） */
 .icon-stack .app-icon.sleep::after { content: none; }
 .icon-stack.selected .app-icon { outline-width: .55cqw; outline-offset: .4cqw; }
-.icon-stack .fuse { border-width: .35cqw; right: -5.3cqw; bottom: -5.3cqw; }
+/* 合体数バッジ：メールアプリの通知バッジと同じく、タイル自身の一部
+   として右上の角に乗せる（2026-11-11 ユーザー指定・同日方式変更）。
+   2桁では横に伸びる */
+.app-icon .fuse {
+  /* 中心は角の内側すぐ（LINE 実例のピクセル実測：中心＝角＋タイル幅の
+     −4% / +4%、直径＝タイル幅の約37%）。角丸で実際の見える角が
+     内側にある分、中心を角の内側に置かないと浮いて見える */
+  position: absolute; top: -11.1cqw; right: -11.1cqw;
+  box-sizing: border-box;
+  min-width: 28.1cqw; height: 28.1cqw; padding: 0 5.2cqw;
+  display: grid; place-items: center;
+  background: #ff3b30; color: #fff; border: 0; border-radius: 999px;
+  font-size: 15cqw; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+  pointer-events: none; z-index: 3;
+}
+/* バッジがタイルの角からはみ出すため、マスの overflow:hidden
+   （旧作由来）で切り取られないようにする */
+.cell { overflow: visible; }
 /* フォルダ内のミニアイコン：矢印は SVG なので、ミニタイルの大きさに
    そのまま比例して縮む（個別指定は不要） */
 @keyframes bounce { 0%,100% { transform: translateY(0) scale(1.02,.97); } 45% { transform: translateY(-8.5cqw) scale(.98,1.03); } }
@@ -490,3 +569,43 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 @keyframes dock-launch { 0%,48%,100% { transform: translateY(0) scale(1,1); } 12% { transform: translateY(-13.7cqw) scale(.96,1.04); } 24% { transform: translateY(0) scale(1.08,.92); } 34% { transform: translateY(-6.3cqw) scale(.98,1.02); } 44% { transform: translateY(0) scale(1,1); } }
 @keyframes dock-launch-small { 0%,48%,100% { transform: translateY(0) scale(1,1); } 12% { transform: translateY(-13.7cqw) scale(.96,1.04); } 24% { transform: translateY(0) scale(1.08,.92); } 34% { transform: translateY(-6.3cqw) scale(.98,1.02); } 44% { transform: translateY(0) scale(1,1); } }
 @keyframes flash { 0% { background: #ffb75b; box-shadow: 0 0 23cqw #ff9a30; } 100% {} }
+
+/* ストアアプリ（ドックの検索の横に固定）とストア画面（2026-11-12）。
+   画面の作りはサウンド画面と同じ。コインのバッジは合体数バッジと
+   同じ見た目（赤丸・右上）で、タイル自身の一部として出す */
+.store-app { border: 0; padding: 0; cursor: pointer; }
+.app-icon.store-tile { --icon: #2f7fe0; }
+.store-app .bag { font-size: 50cqw; line-height: 1; }
+.store-app .coin-badge {
+  position: absolute; top: -11.1cqw; right: -11.1cqw;
+  box-sizing: border-box;
+  min-width: 28.1cqw; height: 28.1cqw; padding: 0 5.2cqw;
+  display: grid; place-items: center;
+  background: #ff3b30; color: #fff; border: 0; border-radius: 999px;
+  font-size: 15cqw; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+  pointer-events: none; z-index: 3;
+}
+.store-sheet {
+  position: absolute; inset: 0; z-index: 40;
+  background: var(--paper); display: block;
+  padding: 52px 18px 18px; overflow-y: auto;
+}
+.store-sheet[hidden] { display: none; }
+.store-coins { font-size: 16px; font-weight: 700; color: var(--ink); margin: 0 2px 12px; }
+.store-note { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 14px 2px 0; }
+.store-row { gap: 12px; }
+.store-texts { flex: 1; min-width: 0; }
+.store-buy {
+  flex: none; border: 0; border-radius: 999px; cursor: pointer;
+  background: var(--purple); color: #fff;
+  font: inherit; font-size: 14px; font-weight: 700; padding: 9px 14px;
+}
+.store-buy:disabled { background: #d8d8de; color: #8a8a91; cursor: default; }
+/* 記号（♞／♚）は原作どおり文字で置く。.arrow は全面に広がっているので
+   グリッドで中央に寄せる（SVG の矢印は全面表示のまま変わらない） */
+.icon-stack .app-icon .arrow { display: grid; place-items: center; line-height: 1; }
+/* ワープの絵の眠りの目（原作 style.css の規則。本作の抽出側に無い分） */
+.app-icon .warp-sleep-eyes { display: none; }
+.app-icon.sleep .warp-eyes { display: none; }
+.app-icon.sleep .warp-sleep-eyes { display: block; }

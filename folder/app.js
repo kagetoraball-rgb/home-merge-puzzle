@@ -7,9 +7,9 @@
  *   （対象の背面にフォルダ風の台座が開き、対象が少し大きくなり、持っている
  *   アイコンは吸い付くように少し縮む）、離すとフォルダができる／収納される。
  *   カテゴリ条件に合わないフォルダの上では切り替わらない。
- * - フォルダもドラッグで動かせる（周囲8マスへ1マス。アイコン／フォルダと
- *   位置交換になり、1手として数える）。ただしフォルダが動いてアイコンを
- *   取り込むことはしない。条件に合わないアイコンをフォルダに重ねても、
+ * - フォルダは掴んで動かせない（2026-11-11 ユーザー決定：受動的にしか
+ *   動けない）。アイコンとの入れ替えや、ドラッグで押し出されたときに
+ *   だけ位置が変わる。条件に合わないアイコンをフォルダに重ねても、
  *   収納されず入れ替えになる。フォルダをタップすると開く画面が出て、
  *   中身をタップするとそのアイコンが周囲の空きマスへ出る。
  * - タップ移動ではフォルダ化しない（入れ替え・移動のみの自動判定）。
@@ -24,6 +24,8 @@
 (function () {
   const E = window.HomeMerge;
   const boardEl = document.getElementById('board');
+  const dockEl = document.getElementById('dock-grid');
+  const wrapEl = document.querySelector('.board-wrap');
   const batteryFill = document.getElementById('batteryFill');
   const batteryText = document.getElementById('batteryText');
   const clockText = document.getElementById('clockText');
@@ -50,7 +52,32 @@
   let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent, phase }
   let press = null; // タップ判定用: { pointerId, cell, handled }
   let tapSel = null; // タップ操作で選択中のアイコンID
-  let openFolderId = null; // 開いているフォルダ画面のフォルダID
+
+  // リアルタイム・インストール（フォルダ版、2026-11-11 ユーザー指定）：
+  // プレイ中は installIntervalSec 秒ごとに新しいアイコンが1個入る。
+  // 移動回数には連動しない。ドラッグ中は盤面を差し替えると操作が
+  // 壊れるため見送り（指を離した直後のチェックで入る）、設定・検索・
+  // 壁紙のシートを開いている間は止める（フォルダを開いている間は進む）
+  let lastInstallAt = Date.now();
+  let installTimerState = state;
+  setInterval(() => {
+    const sec = state.config.installIntervalSec || 0;
+    if (sec <= 0 || state.status !== 'playing') return;
+    if (installTimerState !== state) { // 再起動で新しいゲームになった
+      installTimerState = state;
+      lastInstallAt = Date.now();
+      return;
+    }
+    if (drag) return;
+    if (!settingsSheet.hidden || !searchSheet.hidden || !wallpaperSheet.hidden) return;
+    const now = Date.now();
+    if (now - lastInstallAt < sec * 1000) return;
+    lastInstallAt = now;
+    const r = E.applyTimedInstall(state);
+    if (r.ok) render(state.icons, null);
+  }, 500);
+  let openFolderId = null;
+  let folderPage = 0; // 開いているフォルダの表示ページ（9個＝3×3で1ページ） // 開いているフォルダ画面のフォルダID
   let winShown = false;   // クリア演出を出したか
   let winTimers = [];     // クリア演出のタイマー
   // （反抗アイコンは持った瞬間に発動するので、タップ判定待ちの状態は持たない）
@@ -123,6 +150,7 @@
     statusText.textContent = state.status === 'won' ? 'クリア！' : state.status === 'lost' ? 'ゲームオーバー' : '';
 
     boardEl.innerHTML = '';
+    dockEl.innerHTML = '';
     for (let y = 0; y < state.rows; y++) {
       for (let x = 0; x < state.cols; x++) {
         const cell = document.createElement('div');
@@ -137,20 +165,20 @@
             .map(a => `<rect x="43" y="8" width="14" height="24" rx="4" transform="rotate(${a} 50 50)"/>`).join('');
           const gearSvg = `<svg class="gear" viewBox="0 0 100 100" aria-hidden="true"><defs><mask id="gearHole"><rect width="100" height="100" fill="#fff"/><circle cx="50" cy="50" r="12" fill="#000"/></mask></defs><g fill="#fff" mask="url(#gearHole)"><circle cx="50" cy="50" r="30"/>${teeth}</g></svg>`;
           cell.innerHTML = `<div class="icon-stack"><button class="app-icon gray settings-app" type="button" aria-label="設定">${gearSvg}</button></div>`;
-          boardEl.appendChild(cell);
+          dockEl.appendChild(cell);
           continue;
         }
         if (E.isSearchCell(x, y)) {
           // 設定の横には検索アプリのアイコンが固定で置かれる
           cell.innerHTML = '<div class="icon-stack"><button class="app-icon search-tile search-app" type="button" aria-label="検索"><span class="lens" aria-hidden="true">🔍</span></button></div>';
-          boardEl.appendChild(cell);
+          dockEl.appendChild(cell);
           continue;
         }
         const folder = (folders || []).find(f => f.x === x && f.y === y);
         if (folder) {
           cell.appendChild(folderStackEl(folder));
           cell.title = `フォルダ（${folder.members.map(m => E.TYPES[m.type].name).join('・')}）`;
-          boardEl.appendChild(cell);
+          (y === state.rows - 1 ? dockEl : boardEl).appendChild(cell);
           continue;
         }
         const icon = iconAtIn(icons, x, y);
@@ -160,9 +188,12 @@
           const stack = holder.firstElementChild;
           cell.appendChild(stack);
           if (tapSel === icon.id) stack.classList.add('selected');
-          cell.title = `${E.TYPES[icon.type].name} ${moodLabel(icon)} 放置${icon.neglect}`;
+          cell.title = `${E.TYPES[icon.type].name} ${moodLabel(icon)}`;
         }
-        boardEl.appendChild(cell);
+        // 最下段の列はドック（画面下部の専用枠）の中に描く。
+        // 論理上の盤面は今までどおり4列×7段で、最下段がドックに
+        // 入っているだけ（2026-11-11 ユーザー指定）
+        (y === state.rows - 1 ? dockEl : boardEl).appendChild(cell);
       }
     }
     maybeShowWin();
@@ -215,11 +246,11 @@
   // 位置が変わったアイコンが滑って移動して見えるように描き直す（FLIP）
   function flipRender(icons, hideId, folders) {
     const before = new Map();
-    boardEl.querySelectorAll('.icon-stack[data-icon-id]').forEach(el => {
+    wrapEl.querySelectorAll('.icon-stack[data-icon-id]').forEach(el => {
       before.set(el.dataset.iconId, el.getBoundingClientRect());
     });
     render(icons, hideId, folders);
-    boardEl.querySelectorAll('.icon-stack[data-icon-id]').forEach(el => {
+    wrapEl.querySelectorAll('.icon-stack[data-icon-id]').forEach(el => {
       const b = before.get(el.dataset.iconId);
       if (!b) return;
       const a = el.getBoundingClientRect();
@@ -238,23 +269,8 @@
   function cellFromPoint(clientX, clientY) {
     const el = document.elementFromPoint(clientX, clientY);
     const cell = el && el.closest ? el.closest('.cell') : null;
-    if (!cell || !boardEl.contains(cell)) return null;
+    if (!cell || !wrapEl.contains(cell)) return null;
     return { x: Number(cell.dataset.x), y: Number(cell.dataset.y) };
-  }
-
-  // ポインターに一番近い候補マス（開始マス含む）を選ぶ
-  function nearestTarget(clientX, clientY) {
-    const rect = boardEl.getBoundingClientRect();
-    const fx = (clientX - rect.left) / (rect.width / state.cols) - 0.5;
-    const fy = (clientY - rect.top) / (rect.height / state.rows) - 0.5;
-    let best = null, bestD = Infinity;
-    const candidates = [{ x: drag.fromX, y: drag.fromY, dest: null }]
-      .concat(drag.dests.map(d => ({ x: d.x, y: d.y, dest: d })));
-    for (const c of candidates) {
-      const dd = (c.x - fx) * (c.x - fx) + (c.y - fy) * (c.y - fy);
-      if (dd < bestD) { bestD = dd; best = c; }
-    }
-    return best;
   }
 
   // ドラッグ中のプレビューを、現在の intent で描き直す
@@ -297,27 +313,6 @@
     }
   }
 
-  function renderFolderPreview() {
-    const tx = drag.target ? drag.target.x : null;
-    const ty = drag.target ? drag.target.y : null;
-    let icons = state.icons;
-    if (drag.target) {
-      const icon = icons.find(i => i.x === tx && i.y === ty);
-      if (icon) icons = icons.map(i => (i.id === icon.id ? { ...i, x: drag.fromX, y: drag.fromY } : i));
-    }
-    const folders = [];
-    for (const f0 of state.folders) {
-      // 持っているフォルダ自身は盤面に描かない（アイコン版で hideId に
-      // 相当）。指に付いたゴーストが実物で、盤面にも描くと二重像に
-      // なり「残像」に見える（2026-11-10 ユーザー報告）
-      if (f0.id === drag.folderId) continue;
-      if (drag.target && f0.x === tx && f0.y === ty) {
-        folders.push({ ...f0, x: drag.fromX, y: drag.fromY });
-      } else folders.push(f0);
-    }
-    flipRender(icons, null, folders);
-  }
-
   // アイコンのドラッグ先の決め方（2026-11-10 ユーザー指示の挿入方式）：
   // 行き先は「マス」ではなく「アイコンの間」。対象マスの中心付近だけが
   // 「上に重ねた」扱いでフォルダの待機に入り、それ以外（中心より手前／
@@ -339,12 +334,29 @@
   //   （半径 FOLDER_ZONE 以内）→ フォルダ化の待機（W へは進まない）
   // - W にアイコン（または収納できるフォルダ）がある → 中心を過ぎたら進む
   // - W が空き（または収納できないフォルダ）→ 半分過ぎたら進む
+  // ポインター位置をマス座標（中心が整数）に換算する。
+  // 盤面は上6段とドック（最下段）の2か所に分かれているため、
+  // 縦は指のある側の基準で測る（間の壁紙部分はドック側の換算を
+  // そのまま伸ばす）
+  function pointerCell(clientX, clientY) {
+    const rect = boardEl.getBoundingClientRect();
+    const size = rect.width / state.cols;
+    const fx = (clientX - rect.left) / size - 0.5;
+    let fy;
+    if (clientY <= rect.bottom) {
+      fy = (clientY - rect.top) / size - 0.5;
+    } else {
+      const d = dockEl.getBoundingClientRect();
+      fy = state.rows - 1 + (clientY - d.top) / size - 0.5;
+    }
+    return { fx, fy };
+  }
+
   function computeDragPlan(clientX, clientY) {
     const rect = boardEl.getBoundingClientRect();
     const none = { path: [], folderTarget: null };
     if (rect.width === 0) return none;
-    const fx = (clientX - rect.left) / (rect.width / state.cols) - 0.5;
-    const fy = (clientY - rect.top) / (rect.height / state.rows) - 0.5;
+    const { fx, fy } = pointerCell(clientX, clientY);
     const draggedIcon = state.icons.find(i => i.id === drag.iconId);
     if (!draggedIcon) return none;
     const origin = { x: drag.fromX, y: drag.fromY };
@@ -387,18 +399,6 @@
   }
 
   function updateDragTarget(clientX, clientY) {
-    if (drag.kind === 'folder') {
-      const near = nearestTarget(clientX, clientY);
-      const key = near.dest ? `${near.dest.x},${near.dest.y}` : 'start';
-      // 対象が変わったときだけ描き直す（アイコン版と同じ）。毎 move で
-      // 盤面を再構築すると、滑走中アイコンの実測位置がずれて蓄積し、
-      // 表示が崩れる・残像が出る原因になる（2026-11-10 ユーザー報告）
-      if (drag.targetKey === key) return;
-      drag.targetKey = key;
-      drag.target = near.dest;
-      renderFolderPreview();
-      return;
-    }
     const plan = computeDragPlan(clientX, clientY);
     const landing = plan.folderTarget || plan.path[plan.path.length - 1] || null;
     const key = plan.folderTarget
@@ -423,7 +423,7 @@
   function decorateDragTarget() {
     if (!drag || !drag.target) return;
     if (drag.intent !== 'merge') return;
-    const cell = boardEl.querySelector(`.cell[data-x="${drag.target.x}"][data-y="${drag.target.y}"]`);
+    const cell = wrapEl.querySelector(`.cell[data-x="${drag.target.x}"][data-y="${drag.target.y}"]`);
     if (!cell) return;
     const pedestal = document.createElement('div');
     pedestal.className = 'merge-pedestal open';
@@ -446,7 +446,7 @@
     if (wasActive) flipRender(state.icons, null);
   }
 
-  boardEl.addEventListener('pointerdown', (e) => {
+  wrapEl.addEventListener('pointerdown', (e) => {
     if (state.status !== 'playing') return;
     // ドラッグ中の追加の押下は無視する。
     // マウスの右ボタンなど、主ボタン以外もドラッグ開始に使わない
@@ -458,22 +458,18 @@
     const pos = cellFromPoint(e.clientX, e.clientY);
     if (!pos) return;
     // タップ判定用に押下を記録する（ドラッグにならなかった場合に使う）
-    press = { pointerId: e.pointerId, cell: pos, handled: false };
+    press = { pointerId: e.pointerId, cell: pos, handled: false, startX: e.clientX, startY: e.clientY };
     const icon = E.iconAt(state, pos.x, pos.y);
     if (!icon) {
-      // フォルダはドラッグで動かせる（スマホ準拠。2026-11-10 ユーザー訂正）。
-      // 動かさずに離せばタップとして、開くフロー（handleTap）へ回る
+      // フォルダは掴んで動かせない（2026-11-11 ユーザー決定：受動的に
+      // しか動けない）。ドラッグは開始せず、押下の記録だけに留める。
+      // 動かさずに離せばタップとして開くフロー（handleTap）へ回り、
+      // 動かして離した場合は pointermove 側でタップが取り消され、
+      // 何も起きない
       const folder = E.folderAt(state, pos.x, pos.y);
       if (!folder) return;
-      drag = {
-        kind: 'folder', folderId: folder.id, fromX: pos.x, fromY: pos.y,
-        startX: e.clientX, startY: e.clientY, pointerId: e.pointerId,
-        active: false, ghost: null,
-        dests: E.destinationsForFolder(state, folder.id),
-        target: null, targetKey: 'start',
-        intent: 'swap',
-      };
-      try { boardEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      // 動きの追跡（タップ取り消しの判定）のためだけにキャプチャは取る
+      try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
       e.preventDefault();
       return;
     }
@@ -484,7 +480,7 @@
       press.handled = true;
       tapSel = null;
       E.applyRebelMove(state, icon.id);
-      render(state.icons, null);
+      flipRender(state.icons, null); // 通常の移動と同じく、滑って移動して見えるようにする
       return;
     }
     // 入れ替えは自分の方向に縛られない（経路方式）ため、移動候補（方向の
@@ -498,11 +494,17 @@
     };
     // タップ選択はここでは消さない（離したときにタップとして処理するため）。
     // 実際にドラッグが始まった時点で、pointermove 側で選択を解除する
-    try { boardEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+    try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
     e.preventDefault();
   });
 
-  boardEl.addEventListener('pointermove', (e) => {
+  wrapEl.addEventListener('pointermove', (e) => {
+    if (!drag && press && e.pointerId === press.pointerId && !press.handled
+      && Math.hypot(e.clientX - press.startX, e.clientY - press.startY) >= 8) {
+      // ドラッグできない対象（フォルダ・眠っているアイコンなど）の上で
+      // 動かして離した場合は、タップとして扱わない
+      press.handled = true;
+    }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
@@ -513,10 +515,7 @@
       // ゴーストは盤面のアイコン／フォルダそのもののコピーにして、大きさが
       // 変わらないようにする。盤面用サイズはマス基準（cqw）で決まっているため、
       // 実測したピクセル値を写す
-      const isFolder = drag.kind === 'folder';
-      const srcStack = boardEl.querySelector(isFolder
-        ? `.folder-stack[data-folder-id="${drag.folderId}"]`
-        : `.icon-stack[data-icon-id="${drag.iconId}"]`);
+      const srcStack = wrapEl.querySelector(`.icon-stack[data-icon-id="${drag.iconId}"]`);
       const ghost = document.createElement('div');
       ghost.className = 'drag-ghost';
       if (srcStack) {
@@ -527,47 +526,22 @@
         clone.style.width = stackRect.width + 'px';
         clone.style.height = stackRect.height + 'px';
         clone.style.containerType = 'size'; // ゴースト内でも cqw が盤面と同じ基準になるように
-        if (!isFolder) {
-          const srcIcon = srcStack.querySelector('.app-icon');
-          const iconRect = srcIcon.getBoundingClientRect();
-          const cIcon = clone.querySelector('.app-icon');
-          cIcon.style.width = iconRect.width + 'px';
-          cIcon.style.height = iconRect.height + 'px';
-          cIcon.style.borderRadius = getComputedStyle(srcIcon).borderRadius;
-          cIcon.style.animation = 'none';
-          const srcArrow = srcIcon.querySelector('.arrow');
-          const cArrow = cIcon.querySelector('.arrow');
-          if (srcArrow && cArrow) cArrow.style.fontSize = getComputedStyle(srcArrow).fontSize;
-        } else {
-          // フォルダのミニアイコンは cqw 基準なので、実測ピクセルを写す
-          const srcTile = srcStack.querySelector('.folder-tile');
-          const cTile = clone.querySelector('.folder-tile');
-          if (srcTile && cTile) {
-            const tileRect = srcTile.getBoundingClientRect();
-            cTile.style.width = tileRect.width + 'px';
-            cTile.style.height = tileRect.height + 'px';
-            cTile.style.borderRadius = getComputedStyle(srcTile).borderRadius;
-          }
-          const srcMinis = srcStack.querySelectorAll('.app-icon.mini');
-          clone.querySelectorAll('.app-icon.mini').forEach((cMini, i) => {
-            const sMini = srcMinis[i];
-            if (!sMini) return;
-            const r = sMini.getBoundingClientRect();
-            cMini.style.width = r.width + 'px';
-            cMini.style.height = r.height + 'px';
-            cMini.style.borderRadius = getComputedStyle(sMini).borderRadius;
-            const sArrow = sMini.querySelector('.arrow');
-            const cArrow = cMini.querySelector('.arrow');
-            if (sArrow && cArrow) cArrow.style.fontSize = getComputedStyle(sArrow).fontSize;
-          });
-        }
+        const srcIcon = srcStack.querySelector('.app-icon');
+        const iconRect = srcIcon.getBoundingClientRect();
+        const cIcon = clone.querySelector('.app-icon');
+        cIcon.style.width = iconRect.width + 'px';
+        cIcon.style.height = iconRect.height + 'px';
+        cIcon.style.borderRadius = getComputedStyle(srcIcon).borderRadius;
+        cIcon.style.animation = 'none';
+        const srcArrow = srcIcon.querySelector('.arrow');
+        const cArrow = cIcon.querySelector('.arrow');
+        if (srcArrow && cArrow) cArrow.style.fontSize = getComputedStyle(srcArrow).fontSize;
         ghost.appendChild(clone);
       }
       document.body.appendChild(ghost);
       drag.ghost = ghost;
       // 持った対象は盤面から消える
-      if (isFolder) render(state.icons, null, state.folders.filter(f => f.id !== drag.folderId));
-      else render(state.icons, drag.iconId);
+      render(state.icons, drag.iconId);
     }
     drag.ghost.style.left = e.clientX + 'px';
     drag.ghost.style.top = e.clientY + 'px';
@@ -591,15 +565,12 @@
       if (!cancelled) handleTap(fromCell);
       return;
     }
-    if (!cancelled && kind === 'folder' && target) {
-      E.applyFolderMove(state, folderId, { x: target.x, y: target.y });
-      render(state.icons, null);
-    } else if (!cancelled && kind === 'icon' && (path.length || folderTarget)) {
+    if (!cancelled && kind === 'icon' && (path.length || folderTarget)) {
       // 経路方式で確定する。フォルダ化の待機中に離せば、経路の手前まで
       // 進んで対象へ重なる（フォルダ化）。経路の途中で離せば、そこまでの
       // 入れ替えがそのまま結果になる
       E.applyPathMove(state, iconId, path, folderTarget);
-      render(state.icons, null);
+      flipRender(state.icons, null, state.folders);
     } else {
       flipRender(state.icons, null); // 元の位置へ滑って戻る
     }
@@ -628,21 +599,21 @@
     if (!drag) return;
     finishPointer(true);
   }
-  boardEl.addEventListener('pointerup', onPointerUp);
+  wrapEl.addEventListener('pointerup', onPointerUp);
   window.addEventListener('pointerup', onPointerUp);
-  boardEl.addEventListener('pointercancel', onPointerCancel);
+  wrapEl.addEventListener('pointercancel', onPointerCancel);
   window.addEventListener('pointercancel', onPointerCancel);
 
   // 終了の合図を取りこぼす経路への後始末：
   // ポインターキャプチャを失ったら、ドラッグを中断して表示を戻す
-  boardEl.addEventListener('lostpointercapture', (e) => {
+  wrapEl.addEventListener('lostpointercapture', (e) => {
     if (drag && e.pointerId === drag.pointerId) cancelDrag();
   });
   // ウィンドウがフォーカスを失ったら中断する
   window.addEventListener('blur', () => { press = null; if (drag) cancelDrag(); });
   // 右クリックメニューは出さない（メニューが開くと離す操作が吸われてしまうため）。
   // ドラッグ中に盤面の外で出そうになった場合も、メニューを止めてドラッグを中断する
-  boardEl.addEventListener('contextmenu', (e) => e.preventDefault());
+  wrapEl.addEventListener('contextmenu', (e) => e.preventDefault());
   document.addEventListener('contextmenu', (e) => {
     if (drag) { e.preventDefault(); cancelDrag(); }
   });
@@ -686,7 +657,7 @@
         if (reachable) {
           tapSel = null;
           E.applyMove(state, sel.id, { x: pos.x, y: pos.y, intent: 'swap' });
-          render(state.icons, null);
+          flipRender(state.icons, null, state.folders);
           return;
         }
         // 届かない相手なら、動けるアイコンであれば選択をそちらへ移す
@@ -698,7 +669,7 @@
       const dest = E.destinations(state, tapSel, 'swap').find(d => d.x === pos.x && d.y === pos.y);
       tapSel = null;
       if (dest) E.applyMove(state, sel.id, { x: pos.x, y: pos.y, intent: 'swap' });
-      render(state.icons, null);
+      flipRender(state.icons, null, state.folders);
       return;
     }
     if (icon && icon.z === 0 && icon.mood !== 'rebel') selectIcon(icon.id);
@@ -860,8 +831,11 @@
   // - パネルの外側をタップ → 閉じる（何も起きない）
   // 開いている間はシートが盤面全体を覆うので、盤面の操作は届かない
   const folderSheet = document.getElementById('folderSheet');
+  const folderPanel = document.getElementById('folderPanel');
   const folderOpenGrid = document.getElementById('folderOpenGrid');
+  const folderDots = document.getElementById('folderDots');
   const folderNameEl = document.getElementById('folderName');
+  const FOLDER_PAGE_SIZE = 9; // 1ページは 3×3 の9個（スマホのフォルダ準拠）
   // フォルダ名はカテゴリで決まる（スマホでフォルダ名が付くのと同じ考え方）
   function folderDisplayName(folder) {
     const cat = folder.category;
@@ -873,6 +847,7 @@
   }
   function openFolderSheet(folderId) {
     openFolderId = folderId;
+    folderPage = 0;
     renderFolderSheet();
     folderSheet.hidden = false;
   }
@@ -887,22 +862,71 @@
     // 中身の大きさは盤面のマス実寸に合わせる（マスが container になり、
     // アイコンの cqw 寸法がそのまま効く）
     const cellRect = boardEl.querySelector('.cell').getBoundingClientRect();
+    // パネルは正方形：3×3 のグリッド自体を正方形にし、9個を超えた分は
+    // 次のページに分ける（各ページは左上から読み順に埋まる）
+    const pages = Math.max(1, Math.ceil(folder.members.length / FOLDER_PAGE_SIZE));
+    if (folderPage >= pages) folderPage = pages - 1;
+    const side = cellRect.width * 3 + 12; // 3列＋間のすきま6px×2
+    folderOpenGrid.style.width = side + 'px';
+    folderOpenGrid.style.height = side + 'px';
     folderOpenGrid.innerHTML = '';
-    for (const m of folder.members) {
+    const pageMembers = folder.members.slice(folderPage * FOLDER_PAGE_SIZE, (folderPage + 1) * FOLDER_PAGE_SIZE);
+    for (const m of pageMembers) {
       const item = document.createElement('button');
       item.type = 'button';
       item.className = 'folder-open-item';
       item.dataset.memberId = m.id;
       item.style.width = cellRect.width + 'px';
-      item.style.height = cellRect.height + 'px';
+      item.style.height = cellRect.width + 'px';
       item.innerHTML = `<div class="icon-stack"><div class="app-icon ${E.TYPES[m.type].colorName} normal">${iconArtwork(E.TYPES[m.type])}</div></div>`;
       folderOpenGrid.appendChild(item);
     }
+    // ページの丸印（複数ページのときだけ出す。タップでも切り替わる）
+    folderDots.innerHTML = '';
+    folderDots.hidden = pages <= 1;
+    for (let p = 0; p < pages; p++) {
+      const d = document.createElement('button');
+      d.type = 'button';
+      d.className = 'folder-dot' + (p === folderPage ? ' on' : '');
+      d.dataset.page = p;
+      d.setAttribute('aria-label', `${p + 1}ページ目へ`);
+      folderDots.appendChild(d);
+    }
   }
+  folderDots.addEventListener('click', (e) => {
+    const d = e.target.closest && e.target.closest('.folder-dot');
+    if (!d) return;
+    folderPage = Number(d.dataset.page);
+    renderFolderSheet();
+  });
+  // ページ切替：パネルを左右にスワイプする（スマホ準拠）。スワイプした
+  // 直後のクリックで中身を取り出してしまわないよう、1回だけ取り消す
+  let sheetSwipe = null;
+  let swallowSheetClick = false;
+  folderPanel.addEventListener('pointerdown', (e) => {
+    swallowSheetClick = false; // 新しい押下が始まったら、前の取り消しは失効
+    sheetSwipe = { pointerId: e.pointerId, x: e.clientX };
+  });
+  folderPanel.addEventListener('pointerup', (e) => {
+    if (!sheetSwipe || e.pointerId !== sheetSwipe.pointerId) return;
+    const dx = e.clientX - sheetSwipe.x;
+    sheetSwipe = null;
+    if (Math.abs(dx) < 40) return;
+    const folder = (state.folders || []).find(f => f.id === openFolderId);
+    if (!folder) return;
+    const pages = Math.ceil(folder.members.length / FOLDER_PAGE_SIZE);
+    const next = folderPage + (dx < 0 ? 1 : -1);
+    if (next < 0 || next >= pages) return;
+    folderPage = next;
+    swallowSheetClick = true;
+    renderFolderSheet();
+  });
+  folderPanel.addEventListener('pointercancel', () => { sheetSwipe = null; });
   folderSheet.addEventListener('pointerdown', (e) => {
-    if (!e.target.closest || !e.target.closest('.folder-panel')) closeFolderSheet();
+    if (!e.target.closest || !e.target.closest('.folder-panel, .folder-dots')) closeFolderSheet();
   });
   folderOpenGrid.addEventListener('click', (e) => {
+    if (swallowSheetClick) { swallowSheetClick = false; return; }
     const btn = e.target.closest && e.target.closest('.folder-open-item');
     if (!btn || openFolderId === null) return;
     const r = E.applyFolderExtract(state, openFolderId, Number(btn.dataset.memberId));
@@ -920,7 +944,7 @@
   document.getElementById('wallpaperBack').addEventListener('click', () => {
     wallpaperSheet.hidden = true;
   });
-  boardEl.addEventListener('click', (e) => {
+  wrapEl.addEventListener('click', (e) => {
     if (e.target.closest && e.target.closest('.settings-app')) {
       settingsSheet.hidden = false;
     }

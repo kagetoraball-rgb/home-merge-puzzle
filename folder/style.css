@@ -245,18 +245,32 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 
 /* スマホ本体 */
 .phone {
-  height: min(97dvh, 920px);
-  aspect-ratio: 9 / 19.3;
-  max-width: calc(100vw - 16px);
+  /* スマホの作り（2026-11-11 ユーザー指示）：今までの黒い縁の部分
+     までを画面（壁紙が角まで届く）にして、本体の縁は外側に新しく
+     作る。比率の調整はその外側の縁で行う＝端末全体（縁を含む
+     外形）の比率をそろえる。比率は 17:9（2026-11-11 ユーザーが
+     候補 16:9／17:9／18:9／19.5:9／20:9 から選択）。メイン版と同内容 */
+  --board-w: min(calc(100vw - 64px), calc(min(97dvh, 920px) * 9 / 17 - 44px));
+  box-sizing: border-box;
+  width: calc(var(--board-w) + 20px);
+  height: calc((var(--board-w) + 44px) * 17 / 9 - 24px);
   display: flex; flex-direction: column;
   background: var(--paper);
-  border: 9px solid #191921; border-radius: 46px;
-  box-shadow: 0 24px 60px #0003;
+  border: 0; border-radius: 34px;
+  box-shadow: 0 0 0 12px #131318, 0 24px 60px #0003;
   overflow: hidden;
   padding: 10px 10px 12px;
 }
 @media (max-width: 480px) {
-  .phone { border-width: 4px; border-radius: 32px; height: 98dvh; }
+  /* 狭い画面も同じ作り（縁のリングは 10px に細くする。
+     高さは 98dvh を上限にする） */
+  .phone {
+    border-radius: 28px;
+    box-shadow: 0 0 0 10px #131318, 0 24px 60px #0003;
+    --board-w: min(calc(100vw - 60px), calc(98dvh * 9 / 17 - 40px));
+    width: calc(var(--board-w) + 20px);
+    height: calc((var(--board-w) + 40px) * 17 / 9 - 20px);
+  }
 }
 
 /* ステータスバー（スマホ風） */
@@ -282,15 +296,35 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 /* 盤面は残りの高さいっぱいに広げる。盤面の板・マス目は消してあり、
    アイコンがホーム画面に直接並ぶ見た目にする（格子と操作はそのまま） */
 .board-wrap {
-  flex: 1; min-height: 0; display: flex; max-width: none; margin: 0; width: 100%;
+  flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;
+  max-width: none; margin: 0; width: 100%;
   background: transparent; border: 0; box-shadow: none; padding: 0; border-radius: 0;
 }
+/* マスは正方形。盤面グリッドには上の6段だけを置き、最下段の列は
+   画面下部のドック（専用枠）に入れる（2026-11-11 ユーザー指定、
+   メイン版と同じ）。論理上の盤面は4列×7段のまま */
 #board {
-  flex: 1; height: 100%; width: 100%;
-  aspect-ratio: auto;
+  flex: none; width: var(--board-w); height: auto;
+  aspect-ratio: 4 / 6;
   grid-template-columns: repeat(4, 1fr);
-  grid-template-rows: repeat(8, 1fr);
+  grid-template-rows: repeat(6, 1fr);
   background: transparent;
+}
+/* ドック：画面の下端に置く半透明の専用枠。中身は盤面の最下段
+   （設定・検索の固定アプリ＋右2マス）。マスの大きさは盤面とそろえる */
+.dock {
+  margin-top: auto; flex: none;
+  width: calc(var(--board-w) + 16px);
+  box-sizing: border-box; padding: 8px;
+  background: #ffffff59;
+  -webkit-backdrop-filter: blur(8px) saturate(1.4);
+  backdrop-filter: blur(8px) saturate(1.4);
+  border-radius: 24px;
+}
+#dock-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  height: calc(var(--board-w) / 4);
+  touch-action: none;
 }
 .cell, .cell.check { background: transparent; }
 .cell { cursor: grab; container-type: size; }
@@ -466,7 +500,14 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   padding: 16px;
   max-width: 92%;
 }
-.folder-open-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: center; }
+.folder-open-grid { display: grid; grid-template-columns: repeat(3, auto); gap: 6px; justify-content: start; align-content: start; }
+.folder-dots { display: flex; gap: 7px; justify-content: center; }
+.folder-dots[hidden] { display: none; }
+.folder-dot {
+  width: 8px; height: 8px; border-radius: 50%; border: 0; padding: 0; cursor: pointer;
+  background: rgba(255, 255, 255, .45);
+}
+.folder-dot.on { background: #fff; }
 .folder-open-item {
   container-type: size;
   background: none; border: 0; padding: 0; cursor: pointer;
@@ -531,10 +572,23 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   transform: translateY(-50%) translateY(-3.6cqw);
 }
 .icon-stack .app-icon.sayoku:not(.sleep) .eye, .icon-stack .app-icon.uyoku:not(.sleep) .eye { top: 1.05cqw; }
-.icon-stack .app-icon .sleep-marks { right: -5.3cqw; top: 1cqw; text-shadow: 0 .2cqw #fff; }
-.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 24cqw; }
-.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 20cqw; transform: translateX(-4.8cqw); }
-.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 16cqw; transform: translateX(-9.6cqw); }
+/* Zがタイルの角からはみ出すため、マスの overflow:hidden
+   （旧作由来）で切り取られないようにする（メイン版と同じ） */
+.cell { overflow: visible; }
+/* 眠りのZ（2026-11-11 ユーザー採用の V1、メイン版と同一）：サイズごとに
+   場所を固定した絶対配置。一番小さいZが右目の右（発生地点）に出て、
+   右上へ大きく育ちながら互いにつく。無いサイズの席は詰めない
+   （個数で位置が変わらない）。大 36 / 中 25 / 小 17cqw。
+   コンテナはタイル全体 */
+.icon-stack .app-icon .sleep-marks {
+  display: block; left: 0; top: 0; right: auto;
+  width: 76cqw; height: 80cqw; z-index: 4;
+  text-shadow: 0 0 3cqw #fff, 0 0 3cqw #fff, 0 1cqw 2cqw #fff;
+}
+.icon-stack .app-icon .sleep-marks span { position: absolute; }
+.icon-stack .app-icon .sleep-marks span:nth-child(1) { font-size: 36cqw; right: -29.5cqw; bottom: 53cqw; transform: none; }
+.icon-stack .app-icon .sleep-marks span:nth-child(2) { font-size: 25cqw; right: -15.5cqw; bottom: 32cqw; transform: none; }
+.icon-stack .app-icon .sleep-marks span:nth-child(3) { font-size: 17cqw; right: -2.5cqw; bottom: 17.6cqw; transform: none; }
 /* 眠りの表示は個数で表す .sleep-marks に一本化する（デザイン抽出側の
    ::after の単独 z は重なって読みづらいため、こちらで消す） */
 .icon-stack .app-icon.sleep::after { content: none; }

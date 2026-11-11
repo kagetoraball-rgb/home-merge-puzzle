@@ -28,14 +28,13 @@ const TYPE_IDS = Object.keys(TYPES);
 
 const DEFAULT_CONFIG = {
   cols: 4,
-  rows: 8,
+  rows: 7, // 2026-11-11 ユーザー指定で 8→7（盤面は 4×7=28マス、メイン版 0b37172 と同じ）
   batteryStart: 100,
   batteryPerMove: 1,   // 仮値: 100回移動でクリア（企画書: 試作後に調整）
-  installEvery: 2,     // 2回の移動ごとに1個インストール（2026-11-09 ユーザー指定。変遷： 仮値4 → 3 → 2 → 1 → 3 → 2）
-  eagerChance: 0.20,   // 仮値: 目覚め時にやる気になる確率
-  rebelBase: 0.05,     // 仮値: 反抗の基礎確率
-  rebelPerNeglect: 0.03, // 仮値: 放置1ごとに反抗率 +3%
-  rebelMax: 0.50,      // 仮値: 反抗率の上限
+  installEvery: 2,     // （旧方式）2回の移動ごとに1個インストール。installIntervalSec が有効な間は使われない
+  installIntervalSec: 5, // リアルタイム・インストール：プレイ中、5秒ごとに1個（2026-11-11 ユーザー指定でフォルダ版は移動連動から時間連動へ）
+  eagerChance: 0.15,   // 目覚め時にやる気になる確率（2026-11-11 ユーザー指定で 20%→15%）
+  rebelChance: 0.05,   // 目覚め時に反抗になる確率（固定。2026-11-11 ユーザー決定で放置の蓄積は全廃）
 };
 
 // 初期配置はランダム（2026-11-09 ユーザー指定で企画書の固定配置から変更）。
@@ -69,7 +68,6 @@ function makeIcon(type, x, y, opts = {}) {
     x, y,
     z: opts.z ?? 0,
     mood: opts.mood ?? 'normal', // 'normal' | 'eager' | 'rebel'（睡眠は z>0 で表す）
-    neglect: opts.neglect ?? 0,
   };
 }
 
@@ -168,14 +166,15 @@ function cloneFolders(folders) {
     members: f.members.map(m => ({ ...m })),
   }));
 }
-// アプリのアイコンが固定で置かれるマス（最下段：左端が設定、その横が検索。
-// 2026-11-09 ユーザー指定）。ゲームのアイコンは入ることができず、
-// 空きマスとしても数えない（使えるマスは 32-2=30 個）
-const SETTINGS_CELL = { x: 0, y: 7 };
-const SEARCH_CELL = { x: 1, y: 7 };
+// 最下段の列はドック（2026-11-11 ユーザー決定で列全体がゲームの外）。
+// 左端が設定、その横が検索の固定アプリで、右の2マスもゲームには
+// 使わない。ゲームのアイコン・フォルダは最下段には入ることができず、
+// 空きマスとしても数えない（使えるマスは 28-4=24 個）
+const SETTINGS_CELL = { x: 0, y: 6 }; // 最下段（rows-1）
+const SEARCH_CELL = { x: 1, y: 6 };
 function isSettingsCell(x, y) { return x === SETTINGS_CELL.x && y === SETTINGS_CELL.y; }
 function isSearchCell(x, y) { return x === SEARCH_CELL.x && y === SEARCH_CELL.y; }
-function isReservedCell(x, y) { return isSettingsCell(x, y) || isSearchCell(x, y); }
+function isReservedCell(x, y) { return y === SETTINGS_CELL.y; }
 function emptyCells(state) {
   const cells = [];
   for (let y = 0; y < state.rows; y++) for (let x = 0; x < state.cols; x++) {
@@ -222,7 +221,7 @@ function cloneIcons(icons) { return icons.map(i => ({ ...i })); }
 // 盤面サイズを明示して1歩試す本体
 function tryStepOnBoard(work, mover, dir, board, isFinal, intent, ctx) {
   const cols = board ? board.cols : 4;
-  const rows = board ? board.rows : 8;
+  const rows = board ? board.rows : 7;
   const nx = mover.x + dir[0], ny = mover.y + dir[1];
   if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) return null;
   if (isReservedCell(nx, ny)) return null; // アプリ（設定・検索）のマスには入らない
@@ -399,7 +398,7 @@ function destinationsForFolder(state, folderId) {
 
 // フォルダを動かす。フォルダの移動・入れ替えは1手として数える
 // （2026-11-10 ユーザー訂正）: バッテリーが減り、盤面のアイコンの
-// 睡眠・放置が進み、インストールと勝敗判定も通常どおり行われる。
+// 睡眠が進み、インストールと勝敗判定も通常どおり行われる。
 // 動かしたフォルダ自身は眠らない（眠るのはアイコンだけ）
 function applyFolderMove(state, folderId, dest) {
   if (state.status !== 'playing') return { ok: false, reason: 'ゲームは終了しています' };
@@ -425,14 +424,13 @@ function movedOthers(before, after, moverId) {
   });
 }
 
-// 目覚め時の機嫌抽選（放置が多いほど反抗しやすい）
+// 目覚め時の機嫌抽選（2026-11-11 ユーザー決定：確率は固定で、
+// 蓄積で変わる仕組みは全部なし。反抗 5% / やる気 15% / 残り通常）
 function rollMood(state, icon) {
   const cfg = state.config;
-  const rebelChance = Math.min(cfg.rebelMax, cfg.rebelBase + icon.neglect * cfg.rebelPerNeglect);
   const r = state.rng();
-  icon.neglect = 0;
-  if (r < rebelChance) return 'rebel';
-  if (r < rebelChance + cfg.eagerChance) return 'eager';
+  if (r < cfg.rebelChance) return 'rebel';
+  if (r < cfg.rebelChance + cfg.eagerChance) return 'eager';
   return 'normal';
 }
 
@@ -440,8 +438,7 @@ function rollMood(state, icon) {
  * 移動後の経過処理（移動＝経過制）:
  * - バッテリー減少
  * - 自分以外の睡眠アイコンの z が1減り、0になったら機嫌抽選
- * - 自分以外の通常アイコンの放置 +1
- * - 移動した（合体先含む）アイコンは距離分だけ眠る（やる気消費時は眠らない）
+ * - 移動した（合体先含む）アイコンは距離分だけ眠る（やる気でも同様）
  * - 一定経過ごとに新規アイコンをランダムな空きマスへインストール
  * - 勝敗判定（バッテリー0で勝ち / 全マス埋まると負け）
  */
@@ -458,23 +455,15 @@ function progressAfterMove(state, resultId, distance, wasEager) {
         icon.mood = rollMood(state, icon);
         events.push({ kind: 'wake', iconId: icon.id, mood: icon.mood });
       }
-    } else if (icon.mood === 'normal') {
-      icon.neglect += 1;
     }
   }
 
   const result = state.icons.find(i => i.id === resultId);
   if (result) {
-    result.neglect = 0;
-    if (wasEager) {
-      result.mood = 'normal';
-      result.z = 0;
-      events.push({ kind: 'eagerConsumed', iconId: result.id });
-    } else {
-      result.z = Math.min(distance, 3);
-      result.mood = 'normal';
-      events.push({ kind: 'sleep', iconId: result.id, z: result.z });
-    }
+    result.z = Math.min(distance, 3);
+    result.mood = 'normal';
+    events.push({ kind: 'sleep', iconId: result.id, z: result.z });
+    if (wasEager) events.push({ kind: 'eagerConsumed', iconId: result.id });
   }
 
   if (state.battery <= 0) {
@@ -483,7 +472,7 @@ function progressAfterMove(state, resultId, distance, wasEager) {
     return events;
   }
 
-  if (state.moves % state.config.installEvery === 0) {
+  if (!(state.config.installIntervalSec > 0) && state.moves % state.config.installEvery === 0) {
     const cell = installCell(state);
     if (cell) {
       const type = TYPE_IDS[Math.floor(state.rng() * TYPE_IDS.length)];
@@ -494,12 +483,47 @@ function progressAfterMove(state, resultId, distance, wasEager) {
   }
 
   // 敗北判定: 使えるマスが全部埋まったら負け。アプリ（設定・検索）のマスは使えないので、
-  // 個数ではなく「空きマス（アプリのマスを除く）が0」で判定する（最大30個で満杯）
+  // 個数ではなく「空きマス（アプリのマスを除く）が0」で判定する（最大26個で満杯）
   if (emptyCells(state).length === 0) {
     state.status = 'lost';
     events.push({ kind: 'lost' });
   }
   return events;
+}
+
+// リアルタイム・インストール（フォルダ版）：時間経過で1個だけ入れる。
+// 移動に伴う経過（バッテリー・睡眠）は進めない。入れた結果として
+// 空きマスが無くなったら、その時点で敗北になる
+function applyTimedInstall(state) {
+  if (state.status !== 'playing') return { ok: false, events: [] };
+  const cell = installCell(state);
+  if (!cell) return { ok: false, events: [] };
+  const type = TYPE_IDS[Math.floor(state.rng() * TYPE_IDS.length)];
+  const icon = makeIcon(type, cell.x, cell.y);
+  state.icons.push(icon);
+  const events = [{ kind: 'install', iconId: icon.id, type, x: cell.x, y: cell.y }];
+  if (emptyCells(state).length === 0) {
+    state.status = 'lost';
+    events.push({ kind: 'lost' });
+  }
+  return { ok: true, events };
+}
+
+/*
+ * やる気の効果（2026-11-11 ユーザー指定で旧効果「移動しても眠らない」
+ * から変更、メイン版と同じ）: やる気アイコンの移動で位置が変わった
+ * アイコンは全部、そのアイコンと同じ種類になる（最後に入れ替わった
+ * 相手も含む。フォルダ自体とフォルダの中身は対象外）。
+ * beforePos は移動前の id -> "x,y" の対応。
+ */
+function convertDisplaced(state, beforePos, type, events) {
+  for (const t of state.icons) {
+    const b = beforePos.get(t.id);
+    if (b === undefined || b === t.x + ',' + t.y) continue;
+    if (t.type === type) continue;
+    events.push({ kind: 'converted', iconId: t.id, from: t.type, to: type });
+    t.type = type;
+  }
 }
 
 // 通常の移動を実行する。dest は destinations() の要素（または {x, y, intent?}）。
@@ -520,16 +544,19 @@ function applyMove(state, iconId, dest) {
   const sim = simulateMove(state, iconId, cand.dir, cand.dist, intent, { allowFolder: intent === 'merge' });
   if (!sim) return { ok: false, reason: '移動できません' };
   const wasEager = icon.mood === 'eager';
+  const beforePos = new Map(state.icons.map(i => [i.id, i.x + ',' + i.y]));
   state.icons = sim.icons;
   state.folders = sim.folders; // フォルダと入れ替わった場合も含め、常に取り込む
+  const convEvents = [];
+  if (wasEager) convertDisplaced(state, beforePos, icon.type, convEvents);
   if (sim.foldered) {
     // フォルダに入ったアイコンは盤面にいないため、眠る対象はいない。
-    // 移動としての経過（バッテリー・他のアイコンの睡眠と放置・
+    // 移動としての経過（バッテリー・他のアイコンの睡眠・
     // インストール・勝敗判定）は通常どおり進める
-    const events = progressAfterMove(state, -1, sim.steps, false);
+    const events = [...convEvents, ...progressAfterMove(state, -1, sim.steps, false)];
     return { ok: true, steps: sim.steps, merged: false, foldered: true, folderId: sim.folderId, intent, events };
   }
-  const events = progressAfterMove(state, sim.resultId, sim.steps, wasEager);
+  const events = [...convEvents, ...progressAfterMove(state, sim.resultId, sim.steps, wasEager)];
   return { ok: true, steps: sim.steps, merged: false, foldered: false, intent, events };
 }
 
@@ -590,13 +617,16 @@ function applyPathMove(state, iconId, path, folderTarget) {
   const sim = simulatePathMove(state, iconId, path, { folderTarget: folderTarget || null });
   if (!sim) return { ok: false, reason: '移動できません' };
   const wasEager = icon.mood === 'eager';
+  const beforePos = new Map(state.icons.map(i => [i.id, i.x + ',' + i.y]));
   state.icons = sim.icons;
   state.folders = sim.folders;
+  const convEvents = [];
+  if (wasEager) convertDisplaced(state, beforePos, icon.type, convEvents);
   if (sim.foldered) {
-    const events = progressAfterMove(state, -1, sim.steps, false);
+    const events = [...convEvents, ...progressAfterMove(state, -1, sim.steps, false)];
     return { ok: true, steps: sim.steps, merged: false, foldered: true, folderId: sim.folderId, events };
   }
-  const events = progressAfterMove(state, sim.resultId, sim.steps, wasEager);
+  const events = [...convEvents, ...progressAfterMove(state, sim.resultId, sim.steps, wasEager)];
   return { ok: true, steps: sim.steps, merged: false, foldered: false, events };
 }
 
@@ -606,8 +636,8 @@ function applyPathMove(state, iconId, path, folderTarget) {
  * 周囲だけで足りない場合は、盤面全体の空きマスを読み順に使って補う。
  * 空きマスの総数がメンバー数に足りない場合は解除できない。
  * 解除は「移動」として数えず、バッテリーや他のアイコンの経過は進まない。
- * 収納中は眠り・機嫌・放置が進まない（凍結）ため、出てくるアイコンは
- * 起きた状態（z=0・通常・放置0）になる。
+ * 収納中は眠り・機嫌が進まない（凍結）ため、出てくるアイコンは
+ * 起きた状態（z=0・通常）になる。
  */
 function applyFolderRelease(state, folderId) {
   const folder = (state.folders || []).find(f => f.id === folderId);
@@ -619,7 +649,7 @@ function applyFolderRelease(state, folderId) {
   const rest = empties.filter(c => !(Math.abs(c.x - folder.x) <= 1 && Math.abs(c.y - folder.y) <= 1));
   const cells = around.concat(rest).slice(0, need);
   const placed = folder.members.map((m, i) => {
-    const icon = { ...m, x: cells[i].x, y: cells[i].y, count: 1, z: 0, mood: 'normal', neglect: 0 };
+    const icon = { ...m, x: cells[i].x, y: cells[i].y, count: 1, z: 0, mood: 'normal' };
     state.icons.push(icon);
     return { iconId: icon.id, x: icon.x, y: icon.y };
   });
@@ -648,7 +678,7 @@ function applyFolderExtract(state, folderId, memberId) {
   const cells = around.concat(rest);
   const placed = [];
   const take = (member, cell) => {
-    const icon = { ...member, x: cell.x, y: cell.y, count: 1, z: 0, mood: 'normal', neglect: 0 };
+    const icon = { ...member, x: cell.x, y: cell.y, count: 1, z: 0, mood: 'normal' };
     state.icons.push(icon);
     placed.push({ iconId: icon.id, x: cell.x, y: cell.y });
   };
@@ -702,7 +732,7 @@ function applyRebelMove(state, iconId) {
 const api = {
   TYPES, TYPE_IDS, DEFAULT_CONFIG, INITIAL_LAYOUT,
   mulberry32, createGame, createCustomGame,
-  inside, iconAt: (state, x, y) => iconAt(state.icons, x, y), emptyCells, installCell,
+  inside, iconAt: (state, x, y) => iconAt(state.icons, x, y), emptyCells, installCell, applyTimedInstall,
   SETTINGS_CELL, isSettingsCell, SEARCH_CELL, isSearchCell, isReservedCell,
   destinations, moveIntents, applyMove, applyRebelMove, simulateMove, rollMood,
   simulatePathMove, applyPathMove,
