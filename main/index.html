@@ -13,14 +13,24 @@
     <span class="notch" aria-hidden="true"></span>
     <span class="status-right">
       <span id="statusText"></span>
-      <span class="battery" aria-hidden="true"><span class="battery-body"><span id="batteryFill"></span></span><span class="battery-cap"></span></span>
-      <span id="batteryText">100%</span>
+      <span class="battery" aria-hidden="true"><span class="battery-body"><span id="batteryFill"></span><span id="batteryText">100%</span></span><span class="battery-cap"></span></span>
     </span>
   </div>
 
   <div class="board-wrap">
     <div id="board" aria-label="ホーム画面"></div>
+    <div class="page-bar">
+      <span class="page-dots" id="pageDots"></span>
+    </div>
     <div class="dock"><div id="dock-grid"></div></div>
+
+    <div class="lose-panel" id="losePanel" hidden>
+      <p class="lose-title">ゲームオーバー</p>
+      <p class="lose-text">ホーム画面が一杯になりました。</p>
+      <button id="loseResetBtn" class="lose-reset" type="button" aria-label="リセット">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.99 7.99 0 0 0 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+      </button>
+    </div>
   </div>
 
   <div class="settings-sheet" id="settingsSheet" hidden>
@@ -86,11 +96,12 @@
     </div>
 
     <div id="searchHome">
-      <div class="search-bar" id="searchBar" role="button" aria-label="検索バー">
+      <div class="search-logo" aria-hidden="true">HomeMerge</div>
+      <div class="search-bar" id="searchBar" aria-label="検索バー">
         <span class="search-bar-icon" aria-hidden="true">🔍</span>
         <span class="search-bar-text">検索</span>
       </div>
-      <div class="search-suggestions" id="searchSuggestions" hidden>
+      <div class="search-suggestions" id="searchSuggestions">
         <button class="suggestion" type="button" data-page="howto"><span aria-hidden="true">🔍</span>遊び方</button>
         <button class="suggestion" type="button" data-page="icons"><span aria-hidden="true">🔍</span>方向アイコン</button>
       </div>
@@ -100,15 +111,16 @@
       <button class="page-back" type="button" data-back>‹ 検索に戻る</button>
       <h2 class="page-title">遊び方</h2>
       <div class="howto-list">
-        <section class="howto-item"><h3>目的</h3><p>バッテリーが0%になるまで生き残ればクリア。使えるマスが全部埋まるとゲームオーバーです。</p></section>
+        <section class="howto-item"><h3>目的</h3><p>バッテリーが0%になるまで生き残ればクリア。バッテリーは時間で減っていきます。使えるマスが全部埋まるとゲームオーバーです。クリアするとバッテリーが切れて画面が真っ黒になりますが、「充電する」で起動すれば、クリアした盤面がそのまま見られます。</p></section>
+        <section class="howto-item"><h3>コースとページ</h3><p>コースはホーム画面の「ページ」になっています。クリアすると次のページが1枚作られます。ページの切り替えはドットのタップか、空きマスからの横スワイプでできます。盤面はページごとにそのまま残り、終わったページに出るリセットのマークを押したときだけ作り直されます。コースごとに、バッテリーの量と新しいアイコンが入ってくる間隔が違います。</p></section>
         <section class="howto-item"><h3>動かし方</h3><p>アイコンをドラッグして動かします。動けるのは、そのアイコンの矢印の方向だけです。動けるマス数は、そのアイコンの重ねた数と同じです。タップで選んで、行き先をタップしても動かせます（そのとき重ねる／入れ替えは自動で決まります）。</p></section>
-        <section class="howto-item"><h3>合体</h3><p>同じ種類で、重ねた数が同じアイコン同士は、「重ねる」ことで合体します。ドラッグで重ねて、重なっている間に離せば、止まっていなくても合体します。相手と重ならない位置まで進めて離したり、別のマスへ移したりすると合体しません。合体すると数が合計になり、より遠くまで動けるようになります。途中で触れただけでは合体しません。</p></section>
+        <section class="howto-item"><h3>合体</h3><p>同じ種類で、重ねた数が同じアイコン同士は、「重ねる」ことで合体します。ドラッグで重ねて、重なっている間に離せば、止まっていなくても合体します。相手と重ならない位置まで進めて離したり、別のマスへ移したりすると合体しません。合体すると数が1増え、より遠くまで動けるようになります。途中で触れただけでは合体しません。</p></section>
         <section class="howto-item"><h3>入れ替え</h3><p>違う種類のアイコンや、数が違う同じ種類のアイコンとは、ぶつかると位置が入れ替わります。押し出すことはありません。数が同じ同種でも、合体ではなく入れ替えを選べます。ドラッグで重ねて、相手と重ならない位置まで進めて離すと入れ替えになります。</p></section>
-        <section class="howto-item"><h3>眠り</h3><p>自分で動いたアイコンは、動いたマス数だけ眠ります（最大3）。眠っている間は自分では動けませんが、入れ替えで動かすことはできます。眠りは、ほかのアイコンが動くたびに1ずつ進みます。</p></section>
+        <section class="howto-item"><h3>眠り</h3><p>自分で動いたアイコンは、動いたマスごとに抽選で眠りが増えます（最大3）。種類によって眠りやすさが違い、抽選に外れれば眠りません。眠っている間は自分では動けませんが、入れ替えで動かすことはできます。眠りは、ほかのアイコンが動くたびと、新しいアイコンが入ってくるのと同じタイミングで1ずつ進みます。</p></section>
         <section class="howto-item"><h3>機嫌</h3><p>目覚めたときに機嫌が抽選されます。通常は指示どおりに動きます。やる気は1回だけ眠らずに動けます。通常のまま長く放置すると、反抗しやすくなります。</p></section>
-        <section class="howto-item"><h3>反抗</h3><p>反抗中のアイコンは、つかんだ瞬間に自分の方向へランダムに動いてしまいます。運ぶことはできません。</p></section>
-        <section class="howto-item"><h3>インストール</h3><p>2回動くごとに、新しいアイコンが1個入ってきます。入る場所は、空きマスの中で読み順（左上から右へ、下の行へ）が一番早いマスです。</p></section>
-        <section class="howto-item"><h3>アプリ</h3><p>一番下の段には設定と検索のアプリがあります。設定からは初期化、検索からはこの遊び方や方向アイコンの一覧が見られます。</p></section>
+        <section class="howto-item"><h3>反抗</h3><p>反抗中のアイコンをつかんでタメると、自分の方向のランダムなマスへ跳び、着いた先のアイコンを取り込んで消します。反抗になった時点で、それまで貯めた数は消えてしまいます。取り込んでも数は増えません。</p></section>
+        <section class="howto-item"><h3>インストール</h3><p>プレイ中は、コースごとに決まった間隔で、新しいアイコンが1個入ってきます。入る場所は、空きマスの中で読み順（左上から右へ、下の行へ）が一番早いマスです。</p></section>
+        <section class="howto-item"><h3>アプリ</h3><p>一番下の段には設定と検索のアプリがあります。設定からはゲーム全体の初期化ができます。検索からはこの遊び方や方向アイコンの一覧が見られます。</p></section>
       </div>
     </div>
 
@@ -119,10 +131,57 @@
     </div>
   </div>
 
-  <div class="win-overlay" id="winOverlay" hidden>
-    <div class="win-message">
-      <p class="win-title">クリアおめでとう！</p>
-      <button id="restartBtn" class="win-restart" type="button">再起動</button>
+  <div class="trophy-sheet" id="trophySheet" hidden>
+    <div class="settings-head">
+      <button id="trophyBack" class="settings-back" type="button">‹ 戻る</button>
+      <span class="settings-title">実績</span>
+    </div>
+    <p class="store-coins" id="achSummary"></p>
+    <div id="achList"></div>
+  </div>
+
+  <div class="ach-island" id="achToast" hidden>
+    <span class="ach-island-icon" aria-hidden="true">🏆</span>
+    <span class="ach-island-name" id="achToastName"></span>
+  </div>
+
+  <div class="power-overlay" id="powerOverlay" hidden>
+    <div class="power-body">
+      <p class="power-title" id="powerTitle">クリアおめでとう</p>
+      <svg class="power-battery" viewBox="0 0 118 56" aria-label="バッテリー切れ">
+        <rect x="2" y="2" width="102" height="52" rx="10" fill="none" stroke="#8e8e93" stroke-width="3"/>
+        <rect x="108" y="18" width="8" height="20" rx="3" fill="#8e8e93"/>
+        <rect id="powerBatteryFill" x="8" y="8" width="8" height="40" rx="5" fill="#ff453a"/>
+        <path id="powerBolt" d="M66 8 L40 33 h13 L48 50 L74 24 H60 Z" fill="#1c1c1e" opacity="0"/>
+      </svg>
+      <p class="power-pct" id="powerPct"></p>
+      <button id="chargeBtn" class="power-charge" type="button">🔌 充電する</button>
+    </div>
+    <div class="boot-logo" id="bootLogo" hidden>HomeMerge</div>
+  </div>
+
+  <div class="confirm-sheet" id="confirmSheet" hidden>
+    <div class="confirm-card">
+      <p class="confirm-title" id="confirmTitle"></p>
+      <p class="confirm-text" id="confirmText"></p>
+      <div class="confirm-btns">
+        <button id="confirmCancel" class="confirm-btn" type="button">やめる</button>
+        <button id="confirmOk" class="confirm-btn danger" type="button"></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="moodDim" hidden aria-hidden="true"></div>
+  <div id="tutShade" hidden aria-hidden="true"></div>
+
+  <div class="mood-sheet" id="moodSheet" hidden>
+    <div class="mood-card">
+      <div class="mood-diagram" id="moodDiagram"></div>
+      <p class="mood-title" id="moodTitle"></p>
+      <p class="mood-text" id="moodText"></p>
+      <div class="confirm-btns">
+        <button id="moodOk" class="confirm-btn" type="button">わかった</button>
+      </div>
     </div>
   </div>
 </div>

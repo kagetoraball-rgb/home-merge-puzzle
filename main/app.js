@@ -16,9 +16,11 @@
  * 操作の意図（intent）は画面側が決め、エンジン（simulateMove / applyMove）が
  * それを受けて結果を計算する。将来フォルダ操作を足すときも、この意図の
  * 受け渡しに差し替えられる想定。
- * 反抗アイコンは持った瞬間に発動し、ランダムな位置へ移動する。
- * クリア時は、実際のスマホのバッテリー切れのように画面が真っ黒になる演出のあと、
- * お祝い表示と再起動ボタンを出す。
+ * 反抗アイコンは掴むと左上の反抗マークが育ち始め、タメ終わりで発動する（途中で離すとキャンセル）。
+ * クリア＝バッテリー切れ：画面が真っ黒になり、電池のイラストと
+ * 「充電する」だけが出る。充電して起動すると、クリアした盤面が
+ * そのまま残っている（2026-11-13 ユーザー設計）。盤面はページ
+ * （＝コース）ごとに保持され、リセットを押さない限り固定される。
  */
 (function () {
   const E = window.HomeMerge;
@@ -37,22 +39,680 @@
   }
   updateClock();
   setInterval(updateClock, 1000);
-  const winOverlay = document.getElementById('winOverlay');
-  const restartBtn = document.getElementById('restartBtn');
+  const powerOverlay = document.getElementById('powerOverlay');
+  const chargeBtn = document.getElementById('chargeBtn');
+  const powerBatteryFill = document.getElementById('powerBatteryFill');
+  const powerPct = document.getElementById('powerPct');
+  const losePanel = document.getElementById('losePanel');
+  const loseResetBtn = document.getElementById('loseResetBtn');
+  const bootLogo = document.getElementById('bootLogo');
+  const pageDotsEl = document.getElementById('pageDots');
 
   const REBEL_MARK = '<svg class="rebel-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h3V2m6 0v3h3m0 6h-3v3m-6 0v-3H2"/></svg>';
+
   // 反抗の目（ごきげんサバイバルの iconArtwork と同じパス）
   const REBEL_EYE_PATH = 'M3 1.5C5 3 7.6 5 9.1 6.8C10.9 9 8.5 12.5 6.4 12.5C3.4 12.5 2.4 9.1 3 1.5Z';
   const REBEL_EYE = `<path d="${REBEL_EYE_PATH}" transform="translate(1.6 1.75) scale(.75)"/>`;
   const REBEL_EYE_MIRRORED = `<g transform="translate(25 0) scale(-1 1)">${REBEL_EYE}</g>`;
   const REBEL_EYES = `${REBEL_EYE}${REBEL_EYE_MIRRORED}`;
 
-  let state = E.createGame();
+  /* ==== コース＝ページ制（2026-11-13 ユーザー設計） ====
+   * ページを解放していくことが、そのままコースを増やすことになる。
+   * コースごとに「設置の秒数」と「バッテリー%」の組で難易度を調整する
+   * （ユーザーの方針：設置秒数を難易度に直結させ、バッテリーも組で変える）。
+   * バッテリーは時間制で、減りは全コース共通 1%＝12秒（ユーザーが
+   * チュートリアル基準で決めた「15%を3分で消費」の換算）。
+   * 盤面はページごとに保持され、localStorage に保存される。
+   * リセットを押さない限り、充電してもページを移っても盤面は固定。 */
+  const BATTERY_SEC_PER_PERCENT = 12;
+  // チュートリアルの固定盤面（解説しやすい配置。解説の進め方自体は後で決める）:
+  // - ヨコ2個が横に隣り合い、そのまま重ねて合体を体験できる (1,0)-(2,0)
+  // - タテ2個が縦に隣り合い、同じく合体できる (0,1)-(0,2)
+  // - サヨク（数2）2個が斜め2マスの位置にあり、「数＝動けるマス数」と
+  //   斜めの合体を体験できる (1,4)-(3,2)。間の (2,3) は空けてある
+  // - 異なる種類同士の隣り合い（入れ替えの説明用）: (2,0)ヨコ-(3,0)ウヨク、
+  //   (0,4)ウヨク-(1,4)サヨク
+  // - 眠っているアイコン1個（Z の表示と「眠り」の説明用）: (3,5) ヨコ z=2。
+  //   その隣の (2,5) タテは起きていて、「眠っていても周りは動ける」も見せられる
+  // - 4種類が一通りそろい、空きマスは13個と多めで、序盤は設置も来ない
+  // 上の4行に詰めた配置（2026-11-13 ユーザー指示「バラバラなので
+  // 上に詰めて」）。解説用の要素は今までどおり：ヨコの合体ペア
+  // （横並び）、タテの合体ペア（縦並び）、サヨク数2の斜めペア
+  // （同じ斜め線上に1マス空けて）、眠っているヨコ1個
+  // チュートリアルの最初の盤面（2026-11-13 ユーザーが行順に指定した
+  // 配置：上4行いっぱいの16個、全て数1・眠りなし）
+  //   ヨコ タテ ウヨク サヨク
+  //   タテ ヨコ ウヨク サヨク
+  //   ヨコ サヨク サヨク ウヨク
+  //   ウヨク タテ ヨコ タテ（4行目の一番左は 2026-11-13 ユーザーが訂正）
+  const TUTORIAL_BOARD = [
+    { type: 'yoko', x: 0, y: 0 }, { type: 'tate', x: 1, y: 0 },
+    { type: 'uyoku', x: 2, y: 0 }, { type: 'sayoku', x: 3, y: 0 },
+    { type: 'tate', x: 0, y: 1 }, { type: 'yoko', x: 1, y: 1 },
+    { type: 'uyoku', x: 2, y: 1 }, { type: 'sayoku', x: 3, y: 1 },
+    { type: 'yoko', x: 0, y: 2 }, { type: 'sayoku', x: 1, y: 2 },
+    { type: 'sayoku', x: 2, y: 2 }, { type: 'uyoku', x: 3, y: 2 },
+    { type: 'uyoku', x: 0, y: 3 }, { type: 'tate', x: 1, y: 3 },
+    { type: 'yoko', x: 2, y: 3 }, { type: 'tate', x: 3, y: 3 },
+  ];
+  const COURSES = [
+    // チュートリアル：設置は最初から5秒ごと（2026-11-14夜に10秒から
+    // 変更、ユーザー指示）。開始遅延（当初90秒）は「眠りのカウントが
+    // 統一されない」というユーザーの指摘で 2026-11-14 に廃止
+    // （眠りは設置の秒にだけ進むため、遅延がある間は眠りも止まっていた）
+    { id: 'tutorial', name: 'チュートリアル', battery: 15, installIntervalSec: 5, installDelaySec: 0, fixedBoard: TUTORIAL_BOARD },
+    { id: 'easy', name: '簡単', battery: 30, installIntervalSec: 15, installDelaySec: 0 },
+    { id: 'medium', name: '少し難しい', battery: 50, installIntervalSec: 10, installDelaySec: 0 },
+    { id: 'hard', name: '難しい', battery: 100, installIntervalSec: 10, installDelaySec: 0 },
+  ];
+  const PAGES_KEY = 'homeMerge.pages.v1';
+  // ページは最初はチュートリアルの1枚だけ。クリアすると次のページが
+  // 1枚だけ作られる（2026-11-13 ユーザー指示）。作られたページは
+  // 空っぽで、中身（どのコースになるか）は後で決める
+  const BLANK_COURSE_ID = 'blank';
+  function courseOf(page) {
+    return COURSES.find(c => c.id === page.courseId) || null;
+  }
+  function blankPage() {
+    const s = E.createCustomGame([], { config: courseConfig(COURSES[0]), battery: 100 });
+    s.sleepByMoves = false;
+    return {
+      courseId: BLANK_COURSE_ID, state: s,
+      elapsedSec: 0, clockMs: 0, charged: false, loseClosed: false,
+    };
+  }
+  function courseConfig(course) {
+    return {
+      batteryStart: course.battery,
+      batteryPerMove: 0, // バッテリーは時間制（tickBattery が担う）
+      batterySecPerPercent: BATTERY_SEC_PER_PERCENT,
+      installIntervalSec: 0, // 設置はアプリ側の時計がコース間隔で担う
+      installEvery: 999999, // 旧方式の移動連動インストールを止める
+      sleepSecPerZ: 3, // 眠りの個別タイマー：z 1段ぶんの秒数（コース別に調整できる。当初5秒、2026-11-15にユーザーが3秒へ変更）
+    };
+  }
+  function makePageState(course) {
+    const s = course.fixedBoard
+      ? E.createCustomGame(course.fixedBoard.map(s => ({ ...s })), { config: courseConfig(course) })
+      : E.createGame({ config: courseConfig(course) });
+    // 眠りは全場面で個別タイマーだけが進める（2026-11-15 ユーザー
+    // 指示：チュートリアル中の手数進行も廃止し、リアルタイムに統一）
+    s.sleepByMoves = false;
+    return s;
+  }
+  function freshPage(course) {
+    return {
+      courseId: course.id, state: makePageState(course),
+      elapsedSec: 0, clockMs: 0, charged: false, loseClosed: false,
+      // チュートリアルの導入フロー（新しいページだけ最初から。
+      // 進み具合はページごとに保存される）
+      tut: course.id === 'tutorial' ? { step: 'swap1', branch: null, pair: null } : undefined,
+    };
+  }
+  function serializePage(page) {
+    const s = page.state;
+    return {
+      courseId: page.courseId, status: s.status, battery: s.battery,
+      moves: s.moves, coins: s.coins, purchased: s.purchased,
+      elapsedSec: page.elapsedSec, charged: page.charged, loseClosed: page.loseClosed,
+      tut: page.tut ? { step: page.tut.step, branch: page.tut.branch, pair: page.tut.pair || null, at: page.tut.at || 0 } : undefined,
+      icons: s.icons.map(i => ({
+        id: i.id, type: i.type, count: i.count, x: i.x, y: i.y, z: i.z,
+        mood: i.mood, voided: i.voided, orient: i.orient, spun: i.spun,
+        sleepProgress: i.sleepProgress || 0,
+      })),
+    };
+  }
+  function revivePage(data) {
+    if (!data || !Array.isArray(data.icons)) return null;
+    if (data.courseId === BLANK_COURSE_ID) {
+      const s = E.createCustomGame(data.icons, {
+        config: courseConfig(COURSES[0]),
+        battery: data.battery, moves: data.moves, coins: data.coins,
+        purchased: data.purchased,
+      });
+      s.sleepByMoves = false;
+      E.reserveIconIds(data.icons.map(i => i.id));
+      return {
+        courseId: BLANK_COURSE_ID, state: s,
+        elapsedSec: data.elapsedSec || 0, clockMs: 0,
+        charged: !!data.charged, loseClosed: !!data.loseClosed,
+      };
+    }
+    const course = COURSES.find(c => c.id === data.courseId);
+    if (!course) return null;
+    const s = E.createCustomGame(data.icons, {
+      config: courseConfig(course),
+      battery: data.battery, moves: data.moves, coins: data.coins,
+      purchased: data.purchased,
+    });
+    s.sleepByMoves = false;
+    s.status = data.status === 'won' || data.status === 'lost' ? data.status : 'playing';
+    E.reserveIconIds(data.icons.map(i => i.id));
+    // 導入フローの保存があるチュートリアルは続きから再開する。
+    // 保存のない旧データのチュートリアルは、途中の盤面にフローを
+    // かぶせないため「終わっている」扱いにする
+    let tut;
+    if (course.id === 'tutorial') {
+      tut = { step: 'done', branch: null, pair: null };
+      if (data.tut && ['swap1', 'sleep', 'merge1', 'move2', 'pair', 'done'].includes(data.tut.step)) {
+        const pair = Array.isArray(data.tut.pair)
+          ? data.tut.pair.filter(n => typeof n === 'number').slice(0, 2)
+          : null;
+        tut = { step: data.tut.step, branch: data.tut.branch || null, pair, at: Number(data.tut.at) || 0 };
+        // 最後の範囲の保存が壊れていたら、詰まらないよう終わりにする
+        if (tut.step === 'pair' && (!pair || pair.length !== 2)) {
+          tut = { step: 'done', branch: tut.branch, pair: null };
+        }
+      }
+    }
+    return {
+      courseId: course.id, state: s,
+      elapsedSec: data.elapsedSec || 0, clockMs: 0,
+      charged: !!data.charged, loseClosed: !!data.loseClosed,
+      tut,
+    };
+  }
+  let pages = [];
+  let unlockedCount = 1;
+  let pageIndex = 0;
+  let wipingAll = false; // 初期化の最中は保存しない（beforeunload の保存で消したデータが復活しないように）
+  function savePages(immediate) {
+    if (wipingAll) return;
+    const now = Date.now();
+    if (!immediate && now - savePages.last < 500) return;
+    savePages.last = now;
+    try {
+      localStorage.setItem(PAGES_KEY, JSON.stringify({
+        version: 1, unlockedCount, pageIndex,
+        pages: pages.map(serializePage),
+      }));
+    } catch (_) { /* 保存できない環境ではそのまま遊べる */ }
+  }
+  savePages.last = 0;
+  function loadPages() {
+    let raw = null;
+    try { raw = localStorage.getItem(PAGES_KEY); } catch (_) { /* noop */ }
+    if (raw) {
+      try {
+        const data = JSON.parse(raw);
+        const revived = (data.pages || []).map(revivePage).filter(Boolean);
+        if (revived.length) {
+          // 旧形式（全コース分を先に作っていた保存）は、解放済みの
+          // 分だけを実在のページとして引き継ぐ（解放前のページは
+          // まだ作られていない、という形にそろえる）
+          const keep = Math.min(revived.length, Math.max(1, data.unlockedCount || revived.length));
+          pages = revived.slice(0, keep);
+          unlockedCount = pages.length;
+          pageIndex = Math.min(Math.max(0, data.pageIndex || 0), pages.length - 1);
+          return;
+        }
+      } catch (_) { /* 壊れた保存は作り直す */ }
+    }
+    pages = [freshPage(COURSES[0])];
+    unlockedCount = 1;
+    pageIndex = 0;
+  }
+  loadPages();
+  let state = pages[pageIndex].state;
+  function currentCourse() { return courseOf(currentPage()); }
+  function currentPage() { return pages[pageIndex]; }
+
+  /* ==== チュートリアルの導入フロー（2026-11-14 ユーザー設計） ====
+   * 最初は左上の 2×2 の中だけで自由に入れ替える（一手目）。揃い方で
+   * 分岐 a〜d が決まり、二手目（重ねる）は矢印の誘導で強制する。
+   * 三手目（重ねた数の 2 マス移動）も誘導する。その結果として方向の
+   * 揃った 2 つは、最後に「揃うようになった」ことを示すためだけに
+   * 明るく見せる（操作は強制しない）。プレイヤーが何か動かすか、
+   * 少し置くと流れは終わり、以後は自由に遊べる。
+   * 流れの間は時間を止める（設置・バッテリー・眠りの秒進行なし）。
+   * 眠りはエンジンの手数進行（applyMove が自分以外を 1 ずつ起こす
+   * 方向へ進める）だけで進む。二手目だけは眠りを無効にする
+   * （重ねたアイコンが眠ると 2 マス移動を見せられないため）。
+   * 流れの間は機嫌抽選でやる気・反抗を出さない */
+  const TUT_BRANCHES = {
+    // grid は 2×2 の並び [(0,0),(1,0),(0,1),(1,1)] の種類
+    a: {
+      grid: ['tate', 'tate', 'yoko', 'yoko'],
+      mergeFrom: { x: 1, y: 1 }, mergeTo: { x: 0, y: 1 },
+      moveFrom: { x: 0, y: 1 }, moveTo: { x: 2, y: 1 },
+      range: { x0: 0, x1: 2, y0: 0, y1: 1 },
+    },
+    b: {
+      grid: ['yoko', 'yoko', 'tate', 'tate'],
+      mergeFrom: { x: 0, y: 0 }, mergeTo: { x: 1, y: 0 },
+      moveFrom: { x: 1, y: 0 }, moveTo: { x: 3, y: 0 },
+      range: { x0: 1, x1: 3, y0: 0, y1: 1 },
+    },
+    c: {
+      grid: ['tate', 'yoko', 'tate', 'yoko'],
+      mergeFrom: { x: 0, y: 1 }, mergeTo: { x: 0, y: 0 },
+      moveFrom: { x: 0, y: 0 }, moveTo: { x: 0, y: 2 },
+      range: { x0: 0, x1: 1, y0: 0, y1: 2 },
+    },
+    d: {
+      grid: ['yoko', 'tate', 'yoko', 'tate'],
+      mergeFrom: { x: 1, y: 1 }, mergeTo: { x: 1, y: 0 },
+      moveFrom: { x: 1, y: 0 }, moveTo: { x: 1, y: 2 },
+      range: { x0: 1, x1: 2, y0: 0, y1: 2 },
+    },
+  };
+  function tutOf(page) {
+    return page && page.courseId === 'tutorial' ? (page.tut || null) : null;
+  }
+  function tutActive(page) {
+    const t = tutOf(page);
+    return !!t && t.step !== 'done';
+  }
+  // 流れの最後の案内（⑦）が出ている間。終わるまでは流れの
+  // 締めとして扱い、時間を止めてバッテリーを注目させる
+  function tutGoalActive() {
+    return !!tutGoalUntil && Date.now() < tutGoalUntil;
+  }
+  function tutRange(page) {
+    const t = tutOf(page);
+    if (!t) return null;
+    if (t.step === 'swap1' || t.step === 'merge1') return { x0: 0, x1: 1, y0: 0, y1: 1 };
+    if (t.step === 'move2' && t.branch && TUT_BRANCHES[t.branch]) {
+      return TUT_BRANCHES[t.branch].range;
+    }
+    return null;
+  }
+  function tutGuide(page) {
+    const t = tutOf(page);
+    if (!t || !t.branch || !TUT_BRANCHES[t.branch]) return null;
+    const b = TUT_BRANCHES[t.branch];
+    if (t.step === 'merge1') return { from: b.mergeFrom, to: b.mergeTo, kind: 'merge' };
+    if (t.step === 'move2') return { from: b.moveFrom, to: b.moveTo, kind: 'move' };
+    return null;
+  }
+  function tutOperableIcon(page, icon) {
+    if (!tutActive(page)) return true;
+    const t = tutOf(page);
+    // 三手目の「数だけ見せる」間はまだ触らせない
+    if (t.step === 'move2' && tutMove2BadgePhase(page)) return false;
+    // 眠りの紹介の間も触らせない
+    if (t.step === 'sleep') return false;
+    if (t.step === 'swap1') {
+      const r = tutRange(page);
+      return icon.x >= r.x0 && icon.x <= r.x1 && icon.y >= r.y0 && icon.y <= r.y1;
+    }
+    if (t.step === 'pair') {
+      // 最後は揃うようになったことを示すだけ：操作は強制しない
+      return true;
+    }
+    const g = tutGuide(page);
+    return !!g && icon.x === g.from.x && icon.y === g.from.y;
+  }
+  function tutAllowsMove(page, iconId, dest) {
+    if (!tutActive(page)) return true;
+    const icon = page.state.icons.find(i => i.id === iconId);
+    if (!icon || !tutOperableIcon(page, icon)) return false;
+    const t = tutOf(page);
+    if (t.step === 'swap1') {
+      const r = tutRange(page);
+      return dest.x >= r.x0 && dest.x <= r.x1 && dest.y >= r.y0 && dest.y <= r.y1;
+    }
+    if (t.step === 'pair') {
+      // 最後は示すだけ：行き先も自由
+      return true;
+    }
+    const g = tutGuide(page);
+    return !!g && dest.x === g.to.x && dest.y === g.to.y;
+  }
+  // 明るく残すマスの一覧（暗がりの外に出すマスと、覆うマスの
+  // 判定に使う）。三手目は2段構え：最初はマス単位では何も残さず
+  // 盤面全体を暗くして重ねたアイコンの数だけを見せ（syncTutDim
+  // 側で扱う）、少し置いてから分岐ごとの範囲を明るくする
+  function tutBrightCells(page) {
+    if (!tutActive(page)) return null;
+    const t = tutOf(page);
+    if (t.step === 'move2') {
+      if (tutMove2BadgePhase(page)) return [];
+      const r = tutRange(page);
+      const cells = [];
+      for (let y = r.y0; y <= r.y1; y++) {
+        for (let x = r.x0; x <= r.x1; x++) cells.push({ x, y });
+      }
+      return cells;
+    }
+    if (t.step === 'pair') {
+      return page.state.icons
+        .filter(i => Array.isArray(t.pair) && t.pair.includes(i.id))
+        .map(i => ({ x: i.x, y: i.y }));
+    }
+    if (t.step === 'sleep') {
+      // 眠りの紹介：眠っているアイコンのマスだけを明るく残す
+      const sleeping = page.state.icons.filter(i => i.z > 0);
+      if (sleeping.length) return sleeping.map(i => ({ x: i.x, y: i.y }));
+    }
+    const r = tutRange(page);
+    if (!r) return null;
+    const cells = [];
+    for (let y = r.y0; y <= r.y1; y++) {
+      for (let x = r.x0; x <= r.x1; x++) cells.push({ x, y });
+    }
+    return cells;
+  }
+  // 三手目の結果として「重ねられる状態」になった 2 つを探す
+  function tutFindPair(page) {
+    const s = page.state;
+    for (const a of s.icons) {
+      const dests = E.destinations(s, a.id, 'merge');
+      if (!dests.length) continue;
+      for (const b of s.icons) {
+        if (b.id === a.id || b.type !== a.type || b.count !== a.count) continue;
+        if (dests.some(d => d.x === b.x && d.y === b.y && d.merged)) {
+          return [a.id, b.id];
+        }
+      }
+    }
+    return null;
+  }
+  function tutDetectBranch(page) {
+    const s = page.state;
+    const grid = [[0, 0], [1, 0], [0, 1], [1, 1]].map(([x, y]) => {
+      const i = E.iconAt(s, x, y);
+      return i ? i.type : '';
+    }).join(',');
+    for (const name of Object.keys(TUT_BRANCHES)) {
+      if (TUT_BRANCHES[name].grid.join(',') === grid) return name;
+    }
+    return null;
+  }
+  // 移動が1手ぶん終わったあとのフロー側の後処理（描画の前に呼ぶ）
+  function tutAfterMove(page, r, targetPos) {
+    if (!r || !r.ok || !tutActive(page)) return;
+    const s = page.state;
+    // 流れの間は、目覚め抽選で出たやる気・反抗を通常に戻す
+    for (const icon of s.icons) {
+      if (icon.mood === 'eager' || icon.mood === 'rebel') {
+        icon.mood = 'normal';
+        icon.voided = false;
+      }
+    }
+    const t = tutOf(page);
+    if (t.step === 'swap1') {
+      const branch = tutDetectBranch(page);
+      if (branch) {
+        t.branch = branch;
+        // 一手目のあとに眠りの紹介を挟む（2026-11-14 ユーザー指示）：
+        // 動かしたアイコンを必ず眠らせて、少し見せてから二手目へ
+        // 進む。目覚めは自由プレイが始まってから個別タイマーに任せる
+        // （2026-11-15 ユーザー指示：フロー中の手数進行は廃止。
+        // 眠るアイコンは後続の誘導の手と配置的に無関係だった）
+        const movedIcon = s.icons.find(
+          i => i.x === targetPos.x && i.y === targetPos.y);
+        if (movedIcon) { movedIcon.z = 1; movedIcon.sleepProgress = 0; }
+        t.step = 'sleep';
+        t.at = Date.now();
+      }
+    } else if (t.step === 'merge1') {
+      const merged = s.icons.find(i => i.x === targetPos.x && i.y === targetPos.y);
+      if (merged && merged.count >= 2) {
+        // 二手目だけ眠りを無効にする：重ねたアイコンが眠っていたら
+        // 起こして、そのまま 2 マス移動を見せられるようにする
+        if (merged.z > 0) {
+          merged.z = 0;
+          r.events = r.events.filter(
+            e => !(e.kind === 'sleep' && e.iconId === merged.id));
+        }
+        t.step = 'move2';
+        t.at = Date.now();
+      }
+    } else if (t.step === 'move2') {
+      const g = tutGuide(page);
+      const moved = g && s.icons.find(i => i.x === g.to.x && i.y === g.to.y);
+      if (moved && moved.count >= 2) {
+        // 最後は、結果として方向の揃った 2 つだけを範囲にする
+        const pair = tutFindPair(page);
+        if (pair) {
+          t.pair = pair;
+          t.step = 'pair';
+          t.at = Date.now();
+        } else {
+          t.step = 'done';
+          tutGoalUntil = Date.now() + TUT_GOAL_MS;
+        }
+      }
+    } else if (t.step === 'pair') {
+      // 最後は「揃うようになった」ことを示すだけ。プレイヤーが何か
+      // 動かしたら（その2つを重ねても、別の手でも）流れは終わる
+      t.pair = null;
+      t.step = 'done';
+      tutGoalUntil = Date.now() + TUT_GOAL_MS;
+    }
+    savePages(true);
+  }
+  let tutFingerEl = null;
+  let tutFingerAnim = null;
+  let tutGuideKey = '';
+
+  // 誘導の印：白い矢印（右向きを基準に、移動の向きへ回して使う）。
+  // アイコン自体の白い矢印と重なっても読めるよう、暗い縁取りを下に敷く
+  const TUT_ARROW_PATH = 'M7 24 H39 M27 11 L41 24 L27 37';
+  const TUT_ARROW_SVG = '<svg viewBox="0 0 48 48" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+    + `<path d="${TUT_ARROW_PATH}" fill="none" stroke="rgba(22,22,32,0.5)" `
+    + 'stroke-width="11.5" stroke-linecap="round" stroke-linejoin="round"/>'
+    + `<path d="${TUT_ARROW_PATH}" fill="none" stroke="#ffffff" `
+    + 'stroke-width="6.5" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  // 三手目に入った時刻は tut.at に保存する（最初は数だけ見せ、
+  // 少し置いて範囲を出す。再読み込みしても経過を引き継ぐ）
+  let tutPhaseTimer = null;
+  // 進行の一言（2026-11-14 ユーザー確定の文面）。流れが終わった
+  // 直後だけ、目標の一言（⑦）を少しの間出す
+  // 長い文は意味の切れ目で2行に分ける（改行は pre-line で効く）
+  const TUT_CAPTIONS = {
+    swap1: '①まずは、\nドラッグで並び替えてみよう',
+    sleep: '②眠ると動かせない\nしばらくすると目覚める',
+    merge1: '③次に、同じ種類を重ねよう',
+    move2Badge: '④2マス動けるようになった',
+    move2Range: '⑤移動してみよう',
+    pair: '⑥合体して移動したおかげで\n方向が揃った',
+    goal: '⑦盤面が埋まったらゲームオーバー、\n埋まる前に電池が切れればクリア',
+  };
+  const TUT_GOAL_MS = 4000;
+  let tutCaptionEl = null;
+  let tutCaptionKey = '';
+  let tutCaptionTimer = null;
+  let tutGoalUntil = 0;
+  const TUT_BADGE_MS = 2000;
+  // 三手目の「数だけ見せる」段階かどうか
+  function tutMove2BadgePhase(page) {
+    const t = tutOf(page);
+    if (!t || t.step !== 'move2') return false;
+    if (!t.at) t.at = Date.now();
+    return Date.now() - t.at < TUT_BADGE_MS;
+  }
+  function tutCellCenter(x, y) {
+    const cell = boardEl.querySelector(
+      `.cell[data-x="${x}"][data-y="${y}"]`);
+    if (!cell) return null;
+    const r = cell.getBoundingClientRect();
+    return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
+  }
+  function tutCellRectRel(x, y) {
+    const cell = boardEl.querySelector(
+      `.cell[data-x="${x}"][data-y="${y}"]`);
+    if (!cell) return null;
+    const w = wrapEl.getBoundingClientRect();
+    const r = cell.getBoundingClientRect();
+    return { x: r.x - w.x, y: r.y - w.y, width: r.width, height: r.height };
+  }
+  // 範囲外を暗くし（syncTutDim）、誘導中は矢印をスライドさせる。
+  // render のたびに呼ばれる（ドックの段は暗くしない）
+  function syncTutUI() {
+    const page = currentPage();
+    const bright = tutBrightCells(page);
+    const brightSet = new Set((bright || []).map(c => `${c.x},${c.y}`));
+    boardEl.querySelectorAll('.cell').forEach(cell => {
+      const x = Number(cell.dataset.x);
+      const y = Number(cell.dataset.y);
+      const dim = !!bright && y < state.rows - 1 && !brightSet.has(`${x},${y}`);
+      cell.classList.toggle('tut-dim', dim);
+    });
+    // 三手目の「数だけ見せる」間は矢印を出さず、時間になったら
+    // 範囲表示へ切り替える。最後の表示も、時間になったら流れを
+    // 終わらせる（時計が止まっているのでタイマーで起こす）
+    const badgePhase = tutActive(page) && tutMove2BadgePhase(page);
+    const tNow = tutOf(page);
+    const timed = tutActive(page) && tNow && tNow.at
+      && (badgePhase || tNow.step === 'pair' || tNow.step === 'sleep');
+    if (timed && !tutPhaseTimer) {
+      const rest = Math.max(0, TUT_BADGE_MS - (Date.now() - tNow.at));
+      tutPhaseTimer = setTimeout(() => {
+        tutPhaseTimer = null;
+        const p = currentPage();
+        const tt = tutOf(p);
+        if (tt && tt.step === 'sleep'
+          && Date.now() - (tt.at || 0) >= TUT_BADGE_MS) {
+          // 眠りの紹介が終わったら二手目へ
+          tt.step = 'merge1';
+          savePages(true);
+        }
+        if (tt && tt.step === 'pair'
+          && Date.now() - (tt.at || 0) >= TUT_BADGE_MS) {
+          // 最後の表示は示すだけ：何もしなくても流れは終わる
+          tt.pair = null;
+          tt.step = 'done';
+          tutGoalUntil = Date.now() + TUT_GOAL_MS;
+          savePages(true);
+        }
+        syncTutUI();
+      }, rest + 30);
+    }
+    if (!timed && tutPhaseTimer) {
+      clearTimeout(tutPhaseTimer);
+      tutPhaseTimer = null;
+    }
+    const guideNow = tutActive(page) && !badgePhase ? tutGuide(page) : null;
+    syncTutDim(page, bright);
+    syncTutArrow(guideNow);
+    syncTutCaption(page);
+  }
+  // 進行の一言を盤面の下部（チュートリアル中は空いている段）に
+  // 帯で出す。シート表示中は隠す
+  function syncTutCaption(page) {
+    let text = '';
+    if (!anySheetOpen()) {
+      const t = tutOf(page);
+      if (tutActive(page) && t) {
+        // 三手目は2段構え：赤丸（数）を見せている間は「2マス動ける
+        // ようになった」、範囲と矢印が出たら「移動してみよう」
+        text = t.step === 'move2'
+          ? (tutMove2BadgePhase(page) ? TUT_CAPTIONS.move2Badge : TUT_CAPTIONS.move2Range)
+          : (TUT_CAPTIONS[t.step] || '');
+      }
+      else if (tutGoalUntil && Date.now() < tutGoalUntil) text = TUT_CAPTIONS.goal;
+    }
+    if (text !== tutCaptionKey) {
+      tutCaptionKey = text;
+      if (tutCaptionTimer) { clearTimeout(tutCaptionTimer); tutCaptionTimer = null; }
+      if (tutCaptionEl) { tutCaptionEl.remove(); tutCaptionEl = null; }
+      if (text) {
+        const tl = tutCellRectRel(0, 0);
+        const r4 = tutCellRectRel(0, 4);
+        const br = tutCellRectRel(state.cols - 1, state.rows - 2);
+        if (tl && r4 && br) {
+          const W = br.x + br.width - tl.x;
+          tutCaptionEl = document.createElement('div');
+          tutCaptionEl.id = 'tutCaption';
+          tutCaptionEl.textContent = text;
+          tutCaptionEl.style.left = `${tl.x}px`;
+          tutCaptionEl.style.width = `${W}px`;
+          tutCaptionEl.style.top = `${r4.y + 6}px`;
+          wrapEl.appendChild(tutCaptionEl);
+        }
+      }
+    }
+    // 目標の一言は、期限が来たら消す
+    if (text === TUT_CAPTIONS.goal && !tutCaptionTimer) {
+      tutCaptionTimer = setTimeout(() => {
+        tutCaptionTimer = null;
+        tutGoalUntil = 0;
+        syncTutUI();
+      }, Math.max(0, tutGoalUntil - Date.now()) + 30);
+    }
+  }
+  // 範囲外を暗くする（2026-11-15 ユーザー指示で、穴あきの覆い
+  // 方式から変更）：暗がりは画面全体の一枚（#tutShade）だけに
+  // する。盤面とドックの区分はその上に出るため、範囲外の
+  // タイルはタイルごとに同じ濃さで暗くし、空きマスや壁紙は
+  // 全体の暗がりで暗くなる（どこも一枚分の濃さでそろう）。
+  // 三手目の最初（数だけ見せる間）は、重ねたアイコンのタイルも
+  // 暗くして、数のバッジだけを残す。ドックの段は対象外。
+  // 流れの最後の案内（⑦）の間は、全体を暗くしてバッテリーだけ
+  // を注目させ、それが終わってから流れを終える。
+  // render のたびに呼ばれる
+  function syncTutDim(page, bright) {
+    const goal = tutGoalActive();
+    const show = (!!bright || goal) && !anySheetOpen();
+    tutShadeEl.hidden = !show;
+    // 流れの間は盤面とドックの区分を暗がりの上に出す。最後の
+    // ⑦では区分ごと暗がりの下にして（盤面もドックも暗くなる）、
+    // 電池と案内文だけを上に残す
+    phoneEl.classList.toggle('tut-shading', show && !goal);
+    phoneEl.classList.toggle('tut-goal', show && goal);
+    boardEl.classList.toggle('tut-dimming', show && !goal);
+    // 数だけ見せる間は、重ねたアイコンに印を付ける（タイルの
+    // 暗がりをバッジより下にして、バッジだけを残すため）
+    const t = tutOf(page);
+    const badgePhase = show && t && t.step === 'move2'
+      && tutMove2BadgePhase(page);
+    const g = badgePhase ? tutGuide(page) : null;
+    const badgeIcon = g && page.state.icons.find(
+      i => i.x === g.from.x && i.y === g.from.y);
+    boardEl.querySelectorAll('.icon-stack').forEach(stack => {
+      const on = !!badgeIcon
+        && stack.dataset.iconId === String(badgeIcon.id);
+      stack.classList.toggle('tut-badge-only', on);
+    });
+  }
+  function syncTutArrow(guide) {
+    const showGuide = guide && !anySheetOpen() ? guide : null;
+    const key = showGuide
+      ? `${pageIndex}:${tutOf(currentPage()).step}:${tutOf(currentPage()).branch}` : '';
+    if (key === tutGuideKey) return;
+    tutGuideKey = key;
+    if (tutFingerAnim) { tutFingerAnim.cancel(); tutFingerAnim = null; }
+    if (tutFingerEl) { tutFingerEl.remove(); tutFingerEl = null; }
+    if (!showGuide) return;
+    const a = tutCellCenter(showGuide.from.x, showGuide.from.y);
+    const b = tutCellCenter(showGuide.to.x, showGuide.to.y);
+    if (!a || !b) { tutGuideKey = ''; return; }
+    tutFingerEl = document.createElement('div');
+    tutFingerEl.id = 'tutArrow';
+    tutFingerEl.innerHTML = TUT_ARROW_SVG;
+    // 矢印は移動の向きへ向ける（SVG は右向きが基準）
+    const angle = Math.atan2(
+      showGuide.to.y - showGuide.from.y,
+      showGuide.to.x - showGuide.from.x) * 180 / Math.PI;
+    tutFingerEl.querySelector('svg').style.transform = `rotate(${angle}deg)`;
+    tutFingerEl.style.left = `${a.x}px`;
+    tutFingerEl.style.top = `${a.y}px`;
+    document.body.appendChild(tutFingerEl);
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    tutFingerAnim = tutFingerEl.animate([
+      { transform: 'translate(-50%,-50%)', opacity: 0 },
+      { transform: 'translate(-50%,-50%)', opacity: 1, offset: 0.15 },
+      {
+        transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`,
+        opacity: 1, offset: 0.65,
+      },
+      {
+        transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px))`,
+        opacity: 0, offset: 1,
+      },
+    ], { duration: 1900, iterations: Infinity });
+  }
+
+  const spinShownOrient = new Map(); // スピンの表示済みの向き（回転の動きの判定用）
   let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent }
   let press = null; // タップ判定用: { pointerId, cell, handled }
   let tapSel = null; // タップ操作で選択中のアイコンID
-  let warpChoice = null; // やる気ワープの行き先選び待ちのアイコンID
-  let suppressDockClick = false; // 行き先選びをドックで取り消した直後のクリックを飲む
+  let warpDrag = null; // やる気ワープの行き先選びドラッグ { iconId, pointerId, startX, startY, active, ghost, hoverKey }
+  let pendingAct = null; // 発動のタメ中 { iconId, kind: 'rebel'|'warp', pointerId, timer }
   // 対象の「中心付近」の半幅（マス）。ドラッグ方向に沿って測り、
   // 対象の中心まで残り MERGE_REACH を切ったら到達したことにする。
   // 合体できる相手は、中心の前後 MERGE_REACH の範囲内では合体、
@@ -67,9 +727,8 @@
   // ときだけにする（2026-11-11 ユーザー指示「ドラッグ中のアイコンを
   // 元の位置辺りまで戻さないと起きないように」）
   const STICKY_RADIUS = 0.32;
-  let winShown = false;   // クリア演出を出したか
-  let winTimers = [];     // クリア演出のタイマー
-  // （反抗アイコンは持った瞬間に発動するので、タップ判定待ちの状態は持たない）
+  let charging = false;   // 黒画面で充電アニメーションの最中か
+  // （反抗アイコンは掴むとタメ演出に入るので、タップ判定待ちの状態は持たない）
 
   // 機嫌の表記は、ごきげんサバイバルの MOODS と同じ
   const MOODS = { normal: '通常', eager: 'やる気', sleep: 'ねむり', rebel: '反抗' };
@@ -85,27 +744,37 @@
   // 顔は「矢印＋両目（反抗時は反抗の目）＋反抗マーク」で、口は存在しない。
   // ただしサヨク・ウヨクだけは片目デザイン（2026-11-10 ユーザー指定、手描きスケッチ準拠）：
   // 矢印が斜め下へ来る側の目を、眼帯に隠されたように無くし、矢印をその目に合わせる。
-  // ウヨク（＼、左上と右下）は右目を無くして左目だけ、サヨク（／、右上と左下）は
+  // サヨク（＼、左上と右下）は右目を無くして左目だけ、ウヨク（／、右上と左下）は
   // 左目を無くして右目だけ。反抗の目も、残る側の1つだけにする
   // 矢印はフォント文字ではなく SVG で描く（2026-11-10 ユーザー指摘で変更）：
   // ⤢⤡ などのグリフはブラウザ・端末のフォント差で大きさと位置が変わってしまう
   // ため、こちらで引いた線ならどの環境でも同じ寸法になる。座標はタイル内寸法
-  // （76×80、cqw と同じ物差し）で、斜めは下端が目のライン（高さ約77%）に
+  // （76×76、cqw と同じ物差し）で、斜めは下端が目のラインに
   // そろうように引いてある（ユーザーの手描きスケッチ準拠）
-  // 矢印は全種類で同一の形（タイル内寸法 76×80 単位）：
-  // - 両端フック型の直線矢印。軸の太さ 5、中心 (38,40) から ±20、先端の
+  // 矢印は全種類で同一の形（タイル内寸法 76×76 単位）：
+  // - 両端フック型の直線矢印。軸の太さ 5、中心 (38,36) から ±20、先端の
   //   分岐する2本の線（腕）は 8
   // - 斜めはタテの矢印を中心まわりに 45° 回転させた形（腕は水平・垂直の
-  //   L 字で 11.3）。外枠がタテ・ヨコとそろうよう先端は (18,60) と (58,20)
+  //   L 字で 11.3）。外枠がタテ・ヨコとそろうよう先端は (18,56) と (58,16)
   //   （ウヨクは左右反転）
+  // タイルは正方形（76×76。2026-11-12 ユーザー指定「全部のアイコンの
+  // 比率を正方形で揃える、タテヨコ基準」）。旧 76×80 から移す際、
+  // 絵の内部配置は下端からの距離を保って一律 4 上へ寄せた
+  // （目のラインは 62 → 58）
   const ARROW_SVGS = {
-    tate: '<path d="M38 20 V60"/><path d="M30 28 L38 20 L46 28"/><path d="M30 52 L38 60 L46 52"/>',
-    yoko: '<path d="M18 40 H58"/><path d="M26 32 L18 40 L26 48"/><path d="M50 32 L58 40 L50 48"/>',
-    sayoku: '<path d="M18 60 L58 20"/><path d="M46.7 20 H58 V31.3"/><path d="M18 48.7 V60 H29.3"/>',
-    uyoku: '<path d="M58 60 L18 20"/><path d="M29.3 20 H18 V31.3"/><path d="M58 48.7 V60 H46.7"/>',
+    tate: '<path d="M38 16 V56"/><path d="M30 24 L38 16 L46 24"/><path d="M30 48 L38 56 L46 48"/>',
+    yoko: '<path d="M18 36 H58"/><path d="M26 28 L18 36 L26 44"/><path d="M50 28 L58 36 L50 44"/>',
+    sayoku: '<path d="M58 56 L18 16"/><path d="M29.3 16 H18 V27.3"/><path d="M58 44.7 V56 H46.7"/>',
+    uyoku: '<path d="M18 56 L58 16"/><path d="M46.7 16 H58 V27.3"/><path d="M18 44.7 V56 H29.3"/>',
   };
   // ワープの絵は原作ごきげんサバイバルからそのまま移植（輪に引っかかった
-  // 疑問符と二つの目）。マスクの id がタイルごとに重ならないよう連番を振る
+  // 疑問符と二つの目）。マスクの id がタイルごとに重ならないよう連番を振る。
+  // 目の大きさだけは他アイコンと揃えた（2026-11-12 ユーザー指定）：
+  // この絵は 64×64 の座標で、タイル（76×76）へは ×1.1875 で載る。
+  // 通常の目・眠りの目・反抗の目は、大きさを標準（通常 4.8×7、
+  // 閉じ目 長さ9・太さ1.7、反抗の目は .face と同じ大きさ）に
+  // 換算してある。位置はワープ自身の置き方（中心 (32,51)）のまま
+  // （標準の顔位置へ寄せる案はユーザーが戻すよう指示）
   let warpArtworkSequence = 0;
   function warpArtwork() {
   const artId=++warpArtworkSequence;
@@ -116,20 +785,79 @@
   <mask id="warp-${artId}-back" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64"><rect width="64" height="64" fill="white"/><path d="M7 17A25 8 0 0 0 57 17L51.5 17A19.5 5 0 0 1 12.5 17Z" fill="black" mask="url(#warp-${artId}-front)"/></mask></defs>
   <g fill="none" stroke="currentColor" stroke-width="1.7" mask="url(#warp-${artId}-front)"><ellipse cx="32" cy="17" rx="25" ry="8"/><ellipse cx="32" cy="17" rx="19.5" ry="5"/></g>
   <g mask="url(#warp-${artId}-back)"><g transform="translate(0 0) rotate(0 38 51)" mask="url(#warp-${artId}-weight)"><path d="M25.147 25.993Q25.147 23.483 26.758 20.908Q28.370 18.332 31.461 16.641Q34.552 14.950 38.674 14.950Q42.505 14.950 45.437 16.363Q48.370 17.777 49.968 20.207Q51.567 22.638 51.567 25.491Q51.567 27.737 50.655 29.428Q49.744 31.119 48.489 32.347Q47.234 33.576 43.984 36.482Q43.086 37.301 42.544 37.922Q42.003 38.543 41.738 39.058Q41.474 39.573 41.329 40.089Q41.184 40.604 40.893 41.898Q40.391 44.646 37.749 44.646Q36.375 44.646 35.437 43.748Q34.499 42.849 34.499 41.079Q34.499 38.860 35.186 37.235Q35.873 35.610 37.009 34.382Q38.145 33.153 40.074 31.462Q41.765 29.983 42.518 29.230Q43.271 28.477 43.786 27.552Q44.301 26.627 44.301 25.544Q44.301 23.431 42.729 21.978Q41.157 20.524 38.674 20.524Q35.768 20.524 34.394 21.991Q33.020 23.457 32.069 26.310Q31.170 29.296 28.661 29.296Q27.181 29.296 26.164 28.252Q25.147 27.209 25.147 25.993Z" fill="currentColor"/></g></g>
-  <g class="warp-eyes" fill="currentColor"><ellipse cx="26" cy="51" rx="2.1" ry="2.7"/><ellipse cx="38" cy="51" rx="2.1" ry="2.7"/></g><path class="warp-sleep-eyes" d="M23.5 51h5 M35.5 51h5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><g class="warp-rebel-eyes" transform="translate(21 45) scale(.88)">${REBEL_EYES}</g></svg>${REBEL_MARK}`;
+  <g class="warp-eyes" fill="currentColor"><ellipse cx="26" cy="51" rx="2.02" ry="2.95"/><ellipse cx="38" cy="51" rx="2.02" ry="2.95"/></g><g class="warp-sleep-eyes" fill="currentColor"><rect x="22.2" y="50.3" width="7.6" height="1.43" rx="0.72"/><rect x="34.2" y="50.3" width="7.6" height="1.43" rx="0.72"/></g><g class="warp-rebel-eyes" transform="translate(15.4 41.7) scale(1.327)">${REBEL_EYES}</g></svg>${REBEL_MARK}`;
   }
-  function iconArtwork(type) {
+  // スピンの絵（2026-11-12 新設）：Y字の矢印3本＋ぐるぐる目。
+  // 矢印は進める方向だけを指す外向きの片矢印。回転はこの絵では
+  // 扱わない：向きごとに絵を作り替えるのではなく、動くたびに
+  // アイコンごと回る（.spin-rotor。2026-11-12 ユーザー指定）。
+  // 表情は通常だけぐるぐる目で、他は他アイコンと揃える
+  // （2026-11-12 ユーザー指定）：通常の目は、ユーザーが持ってきた
+  // イラストのぐるぐる目（直線だけの五角形の渦）をなぞって
+  // 直線化したもの。両目とも同じ向き、大きさ 13.2×12.26、
+  // 線の太さ 1.3 の白い線で、中心は標準の目と同じ (28,58)/(48,58)。
+  // 眠りは真っ直ぐな閉じ目（標準と同じ長さ9・太さ1.7、中心も
+  // 標準の目に一致。線ではなく塗りの矩形で描き、CSS の目と
+  // 実寸が一致するようにしてある）、反抗は共通の反抗の目
+  // （REBEL_EYES を .face と同じ大きさ・位置に配置。埋め込み側の
+  // svg は .arrow svg の CSS（fill:none 等）に負けるため、塗りは
+  // インラインスタイルで直接指定する）
+  // ぐるぐる目：なぞって直線化した五角形の渦（中心原点のパス）
+  const GURU_EYE_D = 'M-4.87,4.40 L-6.23,2.84 L-5.79,-1.78 L-5.10,-2.92 L-1.84,-4.61 L1.32,-5.78 L6.20,-1.26 L5.59,0.75 L3.14,4.65 L-0.54,4.69 L-2.35,2.50 L-2.41,0.97 L0.02,-1.32 L1.66,-0.38 L1.42,1.25';
+  function guruEye(cx, cy) {
+    return `<path d="${GURU_EYE_D}" transform="translate(${cx} ${cy})" fill="none" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>`;
+  }
+  const DIR_NAMES = { '-1,-1': '左上', '1,-1': '右上', '0,1': '下', '1,0': '右', '1,1': '右下', '0,-1': '上', '-1,1': '左下', '-1,0': '左' };
+  function spinArtwork(icon) {
+    const sleeping = icon ? icon.z > 0 : false;
+    const rebel = icon ? icon.mood === 'rebel' && !sleeping : false;
+    const label = icon
+      ? E.dirsOf(icon).map(d => DIR_NAMES[d.join(',')]).join('と')
+      : '左上と右上と下';
+    const arrow = (cx, cy, deg) =>
+      `<g transform="translate(${cx} ${cy}) rotate(${deg})"><path d="M0 6 V-9"/><path d="M-4.6 -4.6 L0 -9.6 L4.6 -4.6"/></g>`;
+    // 通常の目：一度も回転していないスピン（最初のY字の間）は他の
+    // アイコンと同じ楕円の目。回転したことがあれば、向きがY字に
+    // 戻っていてもぐるぐる目（2026-11-13 ユーザー指定）
+    const eyes = sleeping
+      ? '<rect x="23.5" y="57.15" width="9" height="1.7" rx="0.85" fill="currentColor" stroke="none"/><rect x="43.5" y="57.15" width="9" height="1.7" rx="0.85" fill="currentColor" stroke="none"/>'
+      : rebel
+        ? ''
+        : (icon && icon.spun)
+          ? `${guruEye(28, 58)}${guruEye(48, 58)}`
+          : '<ellipse cx="28" cy="58" rx="2.4" ry="3.5" fill="currentColor" stroke="none"/><ellipse cx="48" cy="58" rx="2.4" ry="3.5" fill="currentColor" stroke="none"/>';
+    // 反抗の目は .face（幅39.4・中心 (38,58)）と同じ置き方で REBEL_EYES を敷く
+    const rebelEyes = rebel
+      ? `<svg x="18.3" y="47" width="39.4" height="22.1" viewBox="0 0 25 14" style="fill:currentColor;stroke:none" aria-hidden="true">${REBEL_EYES}</svg>`
+      : '';
+    return `<span class="arrow spin-art" role="img" aria-label="${label}"><svg viewBox="0 0 76 76" aria-hidden="true">${arrow(27.5, 23.5, -45)}${arrow(48.5, 23.5, 45)}${arrow(38, 42, 180)}<g fill="none" stroke="currentColor" stroke-width="2.1">${eyes}</g>${rebelEyes}</svg></span>${REBEL_MARK}`;
+  }
+  // オウの王冠（2026-11-12 ユーザー指摘で文字グリフ♚から SVG に変更）：
+  // ♚ は端末のフォント任せで、Mac では小さく潰れて読めなくなるため、
+  // 他のアイコンと同じ 76 箱の SVG で描く。内部の縫い目はフォントと
+  // 同じ型抜き（evenodd）で出し、タイルのグラデーションが透ける。
+  // MAIN が外形＋帯（縫い目を抜いたもの）、PANELS が内側のパネル、
+  // 十字の下の玉は circle で別に置く（evenodd に混ぜると重なりが抜ける）
+  // オウの王冠（2026-11-13 描き直し、ユーザー承認）：手描きでは
+  // ♚の再現性が低かったため、DejaVu Sans の ♚ グリフの輪郭を
+  // そのまま取り出して76箱に配置したパス（高さは従来の王冠と
+  // 同じ33.6、上端16、中心38）
+  const OU_CROWN = 'M36.43 27.88Q36.45 27.81 36.5 27.75Q35.71 26.78 34.56 26.15Q32.9 25.23 31.15 25.23Q29.4 25.23 27.75 26.14Q26.1 27.05 25.15 28.72Q24.21 30.4 24.21 32.19Q24.21 34.01 25.13 35.65Q26.05 37.29 27.71 38.19Q28.21 38.5 28.72 38.68H36.43ZM39.59 38.68H47.28Q47.81 38.5 48.31 38.19Q49.97 37.29 50.88 35.65Q51.79 34.01 51.79 32.19Q51.79 30.4 50.86 28.72Q49.93 27.05 48.28 26.14Q46.62 25.23 44.85 25.23Q43.12 25.23 41.46 26.15Q40.29 26.78 39.53 27.75Q39.57 27.81 39.59 27.88ZM29.51 41V47.8H46.51V41ZM27.67 49.6V41Q26.73 40.71 25.87 40.21Q24.32 39 23.11 36.8Q21.9 34.6 21.9 32.19Q21.9 29.77 23.13 27.56Q24.37 25.34 26.59 24.15Q28.81 22.96 31.15 22.96Q32.95 22.96 34.65 23.66V23.61Q34.65 22.81 35.06 22.1Q35.46 21.39 36.18 20.99Q36.47 20.83 36.83 20.74V19.53H34.41V17.95H36.83V16H39.19V17.95H41.62V19.53H39.19V20.74Q39.55 20.83 39.84 20.99Q40.54 21.39 40.95 22.1Q41.37 22.81 41.37 23.61V23.66Q43.08 22.96 44.85 22.96Q47.19 22.96 49.41 24.15Q51.63 25.34 52.87 27.56Q54.1 29.77 54.1 32.19Q54.1 34.6 52.89 36.8Q51.68 39 50.15 40.21Q49.27 40.71 48.35 41V49.6ZM35.91 23.79Q35.91 24.36 36.19 24.84Q36.47 25.32 36.98 25.6Q37.48 25.88 38 25.88Q38.54 25.88 39.04 25.6Q39.55 25.32 39.82 24.84Q40.09 24.36 40.09 23.79Q40.09 23.25 39.82 22.75Q39.55 22.24 39.04 21.99Q38.54 21.73 38 21.73Q37.48 21.73 36.98 21.99Q36.47 22.24 36.19 22.75Q35.91 23.25 35.91 23.79ZM45.34 42.17V46.66H30.68V42.17ZM35.3 37.54H29.02Q28.61 37.38 28.23 37.11Q26.86 36.37 26.12 35.01Q25.38 33.65 25.38 32.15Q25.38 30.67 26.14 29.29Q26.9 27.9 28.24 27.15Q29.58 26.4 31.01 26.4Q32.41 26.4 33.78 27.14Q34.7 27.66 35.35 28.47Q35.3 28.53 35.3 28.58ZM40.72 28.58Q40.72 28.53 40.67 28.47Q41.32 27.66 42.24 27.14Q43.61 26.4 44.99 26.4Q46.44 26.4 47.78 27.15Q49.12 27.9 49.88 29.29Q50.64 30.67 50.64 32.15Q50.64 33.65 49.9 35.01Q49.16 36.37 47.79 37.11Q47.39 37.38 46.98 37.54H40.72Z';
+  function iconArtwork(type, icon) {
     // ワープだけは原作どおり専用の絵（矢印＋顔の組み合わせではない）
     if (type.id === 'warp') return warpArtwork();
+    if (type.id === 'spin') return spinArtwork(icon);
     let eyes = '<i class="eye left"></i><i class="eye right"></i>';
     let rebelEyes = REBEL_EYES;
-    if (type.id === 'uyoku') { eyes = '<i class="eye left"></i>'; rebelEyes = REBEL_EYE; }
-    else if (type.id === 'sayoku') { eyes = '<i class="eye right"></i>'; rebelEyes = REBEL_EYE_MIRRORED; }
-    // キシ・オウは原作どおり記号（♞／♚）を文字で置く。矢印SVGのある
-    // 通常アイコンは従来どおり SVG で描く
+    if (type.id === 'uyoku') { eyes = '<i class="eye right"></i>'; rebelEyes = REBEL_EYE_MIRRORED; }
+    else if (type.id === 'sayoku') { eyes = '<i class="eye left"></i>'; rebelEyes = REBEL_EYE; }
+    // 矢印SVGのある通常アイコンは従来どおり SVG で描く。
+    // オウの王冠も SVG（OU_CROWN）。記号を文字で置くのは廃止した
     const glyph = ARROW_SVGS[type.id]
-      ? `<svg viewBox="0 0 76 80" aria-hidden="true">${ARROW_SVGS[type.id]}</svg>`
-      : type.symbol;
+      ? `<svg viewBox="0 0 76 76" aria-hidden="true">${ARROW_SVGS[type.id]}</svg>`
+      : type.id === 'ou'
+        ? `<svg viewBox="0 0 76 76" aria-hidden="true"><g style="fill:#fff;stroke:none"><path d="${OU_CROWN}"/></g></svg>`
+        : type.symbol;
     return `<span class="arrow" role="img" aria-label="${type.arrows.join('と')}">${glyph}</span><span class="face" aria-hidden="true">${eyes}<svg class="rebel-eyes" viewBox="0 0 25 14">${rebelEyes}</svg></span>${REBEL_MARK}`;
   }
 
@@ -145,8 +873,28 @@
     // 合体数バッジはタイル自身の一部として描く（メールアプリの通知
     // バッジと同じ方式：アイコンに属し、動きや変形にも一緒に付いてくる。
     // 2026-11-11 ユーザー指摘で、盤面の別層に置く方式から改めた）
-    const fuse = icon.count > 1 ? `<span class="fuse" title="合体数 ${icon.count}">${icon.count}</span>` : '';
-    return `<div class="icon-stack" data-icon-id="${icon.id}"><div class="app-icon ${type.colorName} ${mood} ${type.id}" style="--hop:1.6cqw">${iconArtwork(type)}${sleepMarks}${fuse}</div></div>`;
+    // バッジに title は付けない（2026-11-14夜 ユーザー指示）：数字は
+    // バッジ自体に出ているので不要で、カーソルを合わせたときに
+    // ブラウザの吹き出しが出て盤面の邪魔になっていた
+    // 数の見た目（2026-11-15 ユーザー決定）：数字は残し、色は青・
+    // 赤・緑・白・黒の5色を数2から順に繰り返す。数7からは二巡目
+    // として形を四角にする（色の順は同じ）。色は style.css の
+    // .fuse.col0〜col4、二巡目の形は .fuse.sq
+    const fuse = icon.count > 1
+      ? `<span class="fuse col${(icon.count - 2) % 5}${icon.count >= 7 ? ' sq' : ''}">${icon.count}</span>`
+      : '';
+    let artwork = iconArtwork(type, icon);
+    if (type.id === 'spin') {
+      // スピンは絵全体を .spin-rotor で包んで回す（2026-11-12
+      // ユーザー指定：向きごとの作り替えではなく、動くたびに
+      // アイコンごと回転）。向きが前回の描画から変わっていたら
+      // .turning を付けて、回る動きを見せる
+      const orient = icon.orient ? icon.orient % 4 : 0;
+      const turned = spinShownOrient.has(icon.id) && spinShownOrient.get(icon.id) !== orient;
+      spinShownOrient.set(icon.id, orient);
+      artwork = `<span class="spin-rotor${turned ? ' turning' : ''}" style="--rot:${orient * 90}deg">${artwork}</span>`;
+    }
+    return `<div class="icon-stack" data-icon-id="${icon.id}"><div class="app-icon ${type.colorName} ${mood} ${type.id}" style="--hop:1.6cqw">${artwork}${sleepMarks}${fuse}</div></div>`;
   }
 
   function iconAtIn(icons, x, y) {
@@ -155,20 +903,37 @@
 
   // icons は表示に使うアイコン配列（通常は state.icons、ドラッグ中はプレビューの結果）。
   // hideId のアイコンは描かない（ドラッグ中、指に付いている側）。
-  function render(icons, hideId) {
-    batteryFill.style.width = state.battery + '%';
-    batteryFill.classList.toggle('low', state.battery <= 20);
-    batteryText.textContent = state.battery + '%';
-    statusText.textContent = state.status === 'won' ? 'クリア！' : state.status === 'lost' ? 'ゲームオーバー' : '';
+  // バッテリー表示だけの軽い更新（盤面は作り直さない）
+  function updateBatteryDisplay() {
+    // クリア後に充電が済んだページでは、バッテリーは満タン表示にする
+    // （盤面そのものはクリアした瞬間のまま固定されている）
+    const shownBattery = state.status === 'won' && currentPage().charged ? 100 : state.battery;
+    batteryFill.style.width = shownBattery + '%';
+    batteryFill.classList.toggle('low', shownBattery <= 20);
+    batteryText.textContent = shownBattery + '%';
+  }
+  // 盤面の描画は「毎回作り直し」ではなく「差分更新」（2026-11-13
+  // ユーザー指摘で置き換え）：マスとドックは最初に一度だけ作り、
+  // アイコンは id ごとに要素を使い回す。位置だけ変わったアイコンは
+  // 要素をマスへ移すだけ、見た目（種類・数・眠り・機嫌・向き）が
+  // 変わったアイコンだけ中身を作り直す。結果の見た目は作り直しと
+  // 同じで、要素が生き続ける分だけ軽く、CSSアニメーション
+  // （眠りの揺れなど）が描画のたびに巻き戻ることもない
+  let boardBuilt = false;
+  const cellEls = new Map();   // "x,y" -> .cell 要素
+  let coinBadgeEl = null;      // ストアのコイン数バッジ
+  let trophyBtnEl = null;      // 実績アプリのボタン（赤丸の付け外し用）
+  const iconNodes = new Map(); // icon.id -> { stack, sig }
+  let renderedPage = null;
 
-    boardEl.innerHTML = '';
-    dockEl.innerHTML = '';
+  function buildBoardSkeleton() {
     for (let y = 0; y < state.rows; y++) {
       for (let x = 0; x < state.cols; x++) {
         const cell = document.createElement('div');
         cell.className = 'cell' + ((x + y) % 2 === 1 ? ' check' : '');
         cell.dataset.x = x;
         cell.dataset.y = y;
+        cellEls.set(x + ',' + y, cell);
         if (E.isSettingsCell(x, y)) {
           // 左下の隅には設定アプリのアイコンが固定で置かれる。
           // 歯車は文字（⚙）だとフォントによって中心からずれるため、
@@ -177,32 +942,18 @@
             .map(a => `<rect x="43" y="8" width="14" height="24" rx="4" transform="rotate(${a} 50 50)"/>`).join('');
           const gearSvg = `<svg class="gear" viewBox="0 0 100 100" aria-hidden="true"><defs><mask id="gearHole"><rect width="100" height="100" fill="#fff"/><circle cx="50" cy="50" r="12" fill="#000"/></mask></defs><g fill="#fff" mask="url(#gearHole)"><circle cx="50" cy="50" r="30"/>${teeth}</g></svg>`;
           cell.innerHTML = `<div class="icon-stack"><button class="app-icon gray settings-app" type="button" aria-label="設定">${gearSvg}</button></div>`;
-          dockEl.appendChild(cell);
-          continue;
-        }
-        if (E.isSearchCell(x, y)) {
+        } else if (E.isSearchCell(x, y)) {
           // 設定の横には検索アプリのアイコンが固定で置かれる
           cell.innerHTML = '<div class="icon-stack"><button class="app-icon search-tile search-app" type="button" aria-label="検索"><span class="lens" aria-hidden="true">🔍</span></button></div>';
-          dockEl.appendChild(cell);
-          continue;
-        }
-        if (E.isStoreCell(x, y)) {
+        } else if (E.isStoreCell(x, y)) {
           // 検索の横にはストアアプリが固定で置かれる。バッジは
           // 合体数バッジと同じ見た目で、所持コインの数を出す
           cell.innerHTML = `<div class="icon-stack"><button class="app-icon store-tile store-app" type="button" aria-label="ストア"><span class="bag" aria-hidden="true">🛍️</span><span class="coin-badge">${state.coins}</span></button></div>`;
-          dockEl.appendChild(cell);
-          continue;
-        }
-        const icon = iconAtIn(icons, x, y);
-        if (icon && icon.id !== hideId) {
-          const holder = document.createElement('div');
-          holder.innerHTML = iconHTML(icon);
-          const stack = holder.firstElementChild;
-          cell.appendChild(stack);
-          if (tapSel === icon.id) stack.classList.add('selected');
-          cell.title = icon.count > 1
-            ? `${E.TYPES[icon.type].name}（合体数${icon.count}） ${moodLabel(icon)}`
-            : `${E.TYPES[icon.type].name} ${moodLabel(icon)}`;
+          coinBadgeEl = cell.querySelector('.coin-badge');
+        } else if (x === 3 && y === state.rows - 1) {
+          // ドックの最後の枠は実績アプリ（トロフィー）
+          cell.innerHTML = `<div class="icon-stack"><button class="app-icon trophy-tile trophy-app" type="button" aria-label="実績"><span class="cup" aria-hidden="true">🏆</span><span class="ach-dot" aria-hidden="true">${achData.unseen > 0 ? achData.unseen : ''}</span></button></div>`;
+          trophyBtnEl = cell.querySelector('.trophy-app');
         }
         // 最下段の列はドック（画面下部の専用枠）の中に描く。
         // 論理上の盤面は今までどおり4列×7段で、最下段がドックに
@@ -211,39 +962,224 @@
         (y === state.rows - 1 ? dockEl : boardEl).appendChild(cell);
       }
     }
-    maybeShowWin();
   }
 
-  // クリア演出：画面がフェードして真っ黒になり（バッテリー切れの再現）、
-  // 少し置いてからお祝い表示と再起動ボタンを出す
-  function maybeShowWin() {
-    if (state.status !== 'won' || winShown) return;
-    winShown = true;
-    winOverlay.hidden = false;
+  // アイコンの見た目を決める項目の控え。これが変わったときだけ
+  // 中身（iconHTML）を作り直す
+  function iconSig(icon) {
+    return [icon.type, icon.count, icon.z, icon.mood,
+      icon.voided ? 1 : 0, icon.orient || 0, icon.spun ? 1 : 0].join('|');
+  }
+
+  function render(icons, hideId) {
+    updateBatteryDisplay();
+    // 勝敗の表示はステータスバーには出さない（クリアは黒画面、敗北は
+    // 専用パネルが担う。2026-11-13 ユーザー指示：小さい文字は見づらい）
+    statusText.textContent = '';
+    if (!boardBuilt) { buildBoardSkeleton(); boardBuilt = true; }
+    if (renderedPage !== currentPage()) {
+      // ページが替わったら使い回しは破棄する（ページごとにアイコンの
+      // id が振り直されるため、前のページの要素と混ざらないように）
+      for (const rec of iconNodes.values()) rec.stack.remove();
+      iconNodes.clear();
+      renderedPage = currentPage();
+    }
+    // ドックの変わる部分だけ更新する
+    if (coinBadgeEl && coinBadgeEl.textContent !== String(state.coins)) {
+      coinBadgeEl.textContent = state.coins;
+    }
+    if (trophyBtnEl) trophyBtnEl.classList.toggle('has-unseen', achData.unseen > 0);
+
+    const seen = new Set();
+    const titled = new Set();
+    for (const icon of icons) {
+      if (icon.id === hideId) continue;
+      const cell = cellEls.get(icon.x + ',' + icon.y);
+      if (!cell) continue;
+      seen.add(icon.id);
+      const sig = iconSig(icon);
+      let rec = iconNodes.get(icon.id);
+      if (!rec || rec.sig !== sig) {
+        const holder = document.createElement('div');
+        holder.innerHTML = iconHTML(icon);
+        const stack = holder.firstElementChild;
+        if (rec) rec.stack.replaceWith(stack);
+        rec = { stack, sig };
+        iconNodes.set(icon.id, rec);
+      }
+      if (rec.stack.parentNode !== cell) cell.appendChild(rec.stack);
+      rec.stack.classList.toggle('selected', tapSel === icon.id);
+      cell.title = icon.count > 1
+        ? `${E.TYPES[icon.type].name}（合体数${icon.count}） ${moodLabel(icon)}`
+        : `${E.TYPES[icon.type].name} ${moodLabel(icon)}`;
+      titled.add(cell);
+    }
+    // 消えたアイコン（合体で取り込まれた等）は要素ごと外す。
+    // ドラッグで隠れているアイコンは、戻ってきたときに使い回せる
+    // よう控えだけ残して外す
+    for (const [id, rec] of iconNodes) {
+      if (!seen.has(id)) {
+        rec.stack.remove();
+        if (id !== hideId) iconNodes.delete(id);
+      }
+    }
+    for (const cell of cellEls.values()) {
+      if (!titled.has(cell) && cell.title) cell.title = '';
+    }
+    maybeShowPower();
+    maybeShowEnd();
+    savePages();
+    syncTutUI();
+    markMoodTarget();
+  }
+
+  // クリア＝バッテリー切れの演出（2026-11-13 ユーザー設計）：
+  // 画面がフェードして真っ黒になり、電池のイラストと「充電する」だけが
+  // 出る。「再起動」で盤面を差し替えることはしない。充電して起動すると
+  // クリアした盤面がそのまま見られる
+  function maybeShowPower() {
+    const page = currentPage();
+    const dead = state.status === 'won' && !page.charged;
+    if (!dead) {
+      if (!charging) {
+        powerOverlay.classList.remove('on', 'show-btn');
+        powerOverlay.hidden = true;
+      }
+      return;
+    }
+    if (!powerOverlay.hidden) return;
+    powerOverlay.hidden = false;
+    powerOverlay.classList.remove('charging', 'booting');
+    bootLogo.hidden = true;
+    bootLogo.classList.remove('on');
+    powerBatteryFill.style.width = '8px';
+    powerBatteryFill.style.fill = '#ff453a';
+    powerPct.textContent = '';
+    chargeBtn.disabled = false;
     // hidden 解除直後にクラスを足すと遷移が効かないことがあるため、描画を挟む
     requestAnimationFrame(() => requestAnimationFrame(() => {
-      winOverlay.classList.add('on');
+      powerOverlay.classList.add('on');
     }));
-    winTimers.push(setTimeout(() => winOverlay.classList.add('show-msg'), 1400));
+    setTimeout(() => {
+      if (state.status === 'won' && !currentPage().charged) powerOverlay.classList.add('show-btn');
+    }, 1200);
   }
 
-  function resetWinOverlay() {
-    winTimers.forEach(t => clearTimeout(t));
-    winTimers = [];
-    winShown = false;
-    winOverlay.classList.remove('on', 'show-msg');
-    winOverlay.hidden = true;
-  }
+  chargeBtn.addEventListener('click', () => {
+    if (charging || state.status !== 'won') return;
+    charging = true;
+    chargeBtn.disabled = true;
+    powerOverlay.classList.add('charging');
+    // 充電の演出：電池が満ちていき、中に⚡マークが入る（幅と色は CSS
+    // の遷移、%は数える。⚡は .charging でフェードイン）
+    requestAnimationFrame(() => { powerBatteryFill.style.width = '90px'; });
+    powerBatteryFill.style.fill = '#30d158';
+    const t0 = Date.now();
+    const countTimer = setInterval(() => {
+      const p = Math.min(100, Math.round((Date.now() - t0) / 1200 * 100));
+      powerPct.textContent = p + '%';
+      if (p >= 100) clearInterval(countTimer);
+    }, 50);
+    // 満充電になったら自動で再起動の演出：端末の起動画面（仮置きで
+    // 「HomeMerge」の白く光るロゴ）を見せてから、ホーム画面に戻る
+    setTimeout(() => {
+      powerOverlay.classList.add('booting');
+      bootLogo.hidden = false;
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        bootLogo.classList.add('on');
+      }));
+    }, 1500);
+    setTimeout(() => {
+      const page = currentPage();
+      page.charged = true;
+      charging = false;
+      powerOverlay.classList.remove('on', 'show-btn', 'charging', 'booting');
+      bootLogo.classList.remove('on');
+      setTimeout(() => { powerOverlay.hidden = true; bootLogo.hidden = true; }, 450);
+      savePages(true);
+      render(state.icons, null);
+    }, 3400);
+  });
 
-  restartBtn.addEventListener('click', () => {
-    resetWinOverlay();
+  // 終了したページの表示（2026-11-13 ユーザー指示）：パネルはなしで、
+  // 盤面の上にグレーの覆いをかけ、文言と大きなリセットのマークだけを
+  // 置く。覆いは盤面だけにかけ、ドックには影を落とさない（ドックの
+  // アプリはそのまま使える。ただしストアの購入は終了後は不可）。
+  // ゲームオーバーとクリア済みで同じ作りにし、文言だけ変える。
+  // クリア済みは充電が済んでから（充電前は黒画面が出ている）
+  const loseTitleEl = losePanel.querySelector('.lose-title');
+  const loseTextEl = losePanel.querySelector('.lose-text');
+  function maybeShowEnd() {
+    if (state.status === 'lost') {
+      loseTitleEl.textContent = 'ゲームオーバー';
+      loseTextEl.textContent = 'ホーム画面が一杯になりました。';
+      losePanel.hidden = false;
+    } else if (state.status === 'won' && currentPage().charged) {
+      loseTitleEl.textContent = 'クリア';
+      loseTextEl.textContent = 'このページはクリア済みです。';
+      losePanel.hidden = false;
+    } else {
+      losePanel.hidden = true;
+    }
+  }
+  loseResetBtn.addEventListener('click', () => resetCurrentPage());
+
+  // ページの表示と切り替え。コース名のテキストは出さない
+  // （2026-11-13 ユーザー指示）。ドットは実在するページの分だけ
+  // 中央に並べ、ページが1枚だけのときは出さない（実機の写真準拠）
+  function renderPageBar() {
+    pageDotsEl.innerHTML = '';
+    pageDotsEl.style.display = pages.length <= 1 ? 'none' : '';
+    for (let i = 0; i < pages.length; i++) {
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.className = 'page-dot' + (i === pageIndex ? ' active' : '');
+      const c = courseOf(pages[i]);
+      dot.setAttribute('aria-label', (c ? c.name : '空っぽのページ') + 'へ');
+      dot.addEventListener('click', () => switchPage(i));
+      pageDotsEl.appendChild(dot);
+    }
+  }
+  function cancelInteractions() {
     if (drag) { removeGhost(); drag = null; }
+    if (warpDrag) { removeGhost(); warpDrag = null; }
+    cancelPendingAct();
     press = null;
     tapSel = null;
-    warpChoice = null;
-    state = E.createGame();
+    spinShownOrient.clear();
+  }
+  function switchPage(i) {
+    if (i === pageIndex || i < 0 || i >= pages.length) return;
+    cancelInteractions();
+    pageIndex = i;
+    state = pages[pageIndex].state;
+    renderPageBar();
+    savePages(true);
     render(state.icons, null);
-  });
+  }
+  // そのページを最初の状態からやり直す（チュートリアルは固定盤面に
+  // 戻る。空っぽのページは空っぽに戻る）
+  function resetCurrentPage() {
+    cancelInteractions();
+    const cur = currentPage();
+    pages[pageIndex] = cur.courseId === BLANK_COURSE_ID ? blankPage() : freshPage(courseOf(cur));
+    state = pages[pageIndex].state;
+    achNewRun();
+    renderPageBar();
+    savePages(true);
+    render(state.icons, null);
+  }
+  // クリアしたら次のページを1枚だけ作る（2026-11-13 ユーザー指示）。
+  // 作られるページは空っぽで、中身は後で決める。コースの数まで
+  // 作り終えたら、それ以上は増えない
+  function unlockNextPage() {
+    if (pageIndex === pages.length - 1 && pages.length < COURSES.length) {
+      pages.push(blankPage());
+      unlockedCount = pages.length;
+      renderPageBar();
+      savePages(true);
+    }
+  }
 
   // 位置が変わったアイコンが滑って移動して見えるように描き直す（FLIP）
   function flipRender(icons, hideId) {
@@ -308,17 +1244,6 @@
   }
 
   function pickDragTarget(clientX, clientY) {
-    // キシのジャンプは直線の移動ではないので、対象は指の下のマス
-    // （着地点のどれか）で決める。合体できる相手（同種・同数）なら
-    // 意図は merge、それ以外は swap（他のアイコンと同じ判定）
-    const dragIcon = state.icons.find(i => i.id === drag.iconId);
-    if (dragIcon && dragIcon.type === 'kishi') {
-      const { fx, fy } = pointerCell(clientX, clientY);
-      const dest = drag.dests.find(d => d.x === Math.round(fx) && d.y === Math.round(fy));
-      if (!dest) return { dest: null, intent: 'swap', along: null };
-      const mergeable = E.moveIntents(state, drag.iconId, dest.x, dest.y).includes('merge');
-      return { dest, intent: mergeable ? 'merge' : 'swap', along: null };
-    }
     const { fx, fy } = pointerCell(clientX, clientY);
     const projOf = c => {
       const dx = c.dest.dir[0], dy = c.dest.dir[1];
@@ -346,7 +1271,17 @@
   // - 入れ替え: 対象がドラッグ元へ滑る解決を見せる（従来どおり）
   function renderDragPreview() {
     if (!drag.target) { flipRender(state.icons, drag.iconId); return; }
-    if (drag.intent === 'merge') { flipRender(state.icons, drag.iconId); return; }
+    if (drag.intent === 'merge') {
+      // 合体の予告でも、そこまでに通り過ぎたアイコンは元の位置に
+      // 戻さない（2026-11-12 ユーザー報告「重ねようとしたら下の列が
+      // 元の位置に戻った」への対策）：対象の手前までの歩行を
+      // 入れ替えとして見せ続け、対象だけは元のマスに留める。
+      // 距離1（隣）では通る相手がいないので従来どおり盤面そのまま
+      if (drag.target.dist <= 1) { flipRender(state.icons, drag.iconId); return; }
+      const sim = E.simulateMove(state, drag.iconId, drag.target.dir, drag.target.dist - 1, 'swap');
+      flipRender(sim ? sim.icons : state.icons, drag.iconId);
+      return;
+    }
     const sim = E.simulateMove(state, drag.iconId, drag.target.dir, drag.target.dist, drag.intent);
     flipRender(sim ? sim.icons : state.icons, drag.iconId);
   }
@@ -402,12 +1337,254 @@
     if (wasActive) flipRender(state.icons, null);
   }
 
+  // ドラッグのゴースト（盤面のアイコンそのもののコピー）を作る。
+  // 大きさが変わらないよう、盤面用サイズ（マス基準 cqw）の実測した
+  // ピクセル値を写す
+  function createDragGhost(iconId) {
+    const srcStack = wrapEl.querySelector(`.icon-stack[data-icon-id="${iconId}"]`);
+    const ghost = document.createElement('div');
+    ghost.className = 'drag-ghost';
+    if (srcStack) {
+      const stackRect = srcStack.getBoundingClientRect();
+      const srcIcon = srcStack.querySelector('.app-icon');
+      const iconRect = srcIcon.getBoundingClientRect();
+      const clone = srcStack.cloneNode(true);
+      clone.style.transform = '';
+      clone.style.transition = '';
+      clone.style.width = stackRect.width + 'px';
+      clone.style.height = stackRect.height + 'px';
+      clone.style.containerType = 'size'; // ゴースト内でも cqw が盤面と同じ基準になるように
+      const cIcon = clone.querySelector('.app-icon');
+      cIcon.style.width = iconRect.width + 'px';
+      cIcon.style.height = iconRect.height + 'px';
+      cIcon.style.borderRadius = getComputedStyle(srcIcon).borderRadius;
+      cIcon.style.animation = 'none';
+      const srcArrow = srcIcon.querySelector('.arrow');
+      const cArrow = cIcon.querySelector('.arrow');
+      if (srcArrow && cArrow) cArrow.style.fontSize = getComputedStyle(srcArrow).fontSize;
+      ghost.appendChild(clone);
+    }
+    document.body.appendChild(ghost);
+    return ghost;
+  }
+
+  // やる気ワープの行き先選びドラッグ：指に付いてくるのはワープ自身の
+  // ゴーストだけで、盤面の他のアイコンは離すまで一切動かさない。
+  // 狙っているマスには印（.warp-target）だけを付ける
+  function warpDragHover(clientX, clientY) {
+    const pos = cellFromPoint(clientX, clientY);
+    const warpIcon = state.icons.find(i => i.id === warpDrag.iconId);
+    const ok = pos && warpIcon && !E.isReservedCell(pos.x, pos.y)
+      && !(pos.x === warpIcon.x && pos.y === warpIcon.y);
+    const key = ok ? `${pos.x},${pos.y}` : null;
+    if (key === warpDrag.hoverKey) return;
+    clearWarpHover();
+    warpDrag.hoverKey = key;
+    if (key) {
+      const cell = wrapEl.querySelector(`.cell[data-x="${pos.x}"][data-y="${pos.y}"]`);
+      if (cell) cell.classList.add('warp-target');
+    }
+  }
+  function clearWarpHover() {
+    wrapEl.querySelectorAll('.cell.warp-target').forEach(c => c.classList.remove('warp-target'));
+    if (warpDrag) warpDrag.hoverKey = null;
+  }
+  function cancelWarpDrag() {
+    if (!warpDrag) return;
+    const wasActive = warpDrag.active;
+    removeGhost();
+    if (warpDrag) warpDrag.ghost = null;
+    clearWarpHover();
+    warpDrag = null;
+    press = null;
+    if (wasActive) flipRender(state.icons, null);
+  }
+  // 離した瞬間に、離した場所のマスと交換する。ワープ自身のマス・
+  // ドックの列・盤面の外で離したら取り消し（手数は進まない）
+  function finishWarpDrag(upX, upY) {
+    const wd = warpDrag;
+    const warpIcon = state.icons.find(i => i.id === wd.iconId);
+    const pos = cellFromPoint(upX, upY);
+    removeGhost();
+    clearWarpHover();
+    warpDrag = null;
+    press = null;
+    if (warpIcon && pos && !E.isReservedCell(pos.x, pos.y)
+      && !(pos.x === warpIcon.x && pos.y === warpIcon.y)) {
+      const wr = E.applyWarpSwap(state, wd.iconId, { x: pos.x, y: pos.y });
+      if (wr && wr.ok) { playEventSounds(wr.events); achOnMove(wr); }
+    }
+    flipRender(state.icons, null);
+  }
+
+  // 発動のタメ（2026-11-12 ユーザー指定）：反抗は左上の反抗マークが
+  // 脈打ちながら育つ演出（案3）、ワープはジャンプ前のタメ演出。
+  // 掴み続けて演出が終わると発動し、
+  // 途中で離すとキャンセルされる（タップ＝押してすぐ離す、では
+  // 発動しなくなった）
+  const REBEL_RAMPAGE_MS = 1000;
+  const WARP_CHARGE_MS = 1000; // CSS の warp-charge の長さと合わせる
+  function startPendingAct(icon, kind, pointerId) {
+    const stack = wrapEl.querySelector(`.icon-stack[data-icon-id="${icon.id}"]`);
+    if (stack) stack.classList.add(kind === 'rebel' ? 'rampaging' : 'charging');
+    pendingAct = { iconId: icon.id, kind, pointerId, timer: null };
+    try { wrapEl.setPointerCapture(pointerId); } catch (_) { /* noop */ }
+    pendingAct.timer = setTimeout(firePendingAct, kind === 'rebel' ? REBEL_RAMPAGE_MS : WARP_CHARGE_MS);
+  }
+  function clearPendingActVisual() {
+    wrapEl.querySelectorAll('.icon-stack.rampaging, .icon-stack.charging')
+      .forEach(s => s.classList.remove('rampaging', 'charging'));
+  }
+  function cancelPendingAct() {
+    if (!pendingAct) return;
+    clearTimeout(pendingAct.timer);
+    pendingAct = null;
+    clearPendingActVisual();
+    press = null;
+  }
+  function firePendingAct() {
+    if (!pendingAct) return;
+    const { iconId, kind } = pendingAct;
+    pendingAct = null;
+    clearPendingActVisual();
+    if (kind === 'rebel') {
+      const rr = E.applyRebelMove(state, iconId);
+      if (rr && rr.ok) { seRebel(); playEventSounds(rr.events); achOnMove(rr); }
+    } else {
+      const wr = E.applyWarpSwap(state, iconId, null);
+      if (wr && wr.ok) { playEventSounds(wr.events); achOnMove(wr); }
+    }
+    flipRender(state.icons, null); // 通常の移動と同じく、滑って移動して見えるようにする
+  }
+
+  // ページのスワイプ切り替え（2026-11-13 ユーザー指示）：空きマスから
+  // 横にスワイプするとページがめくれる（左で次へ、右で前へ）。
+  // アイコンのマスから始めた場合は通常のドラッグになるので対象外。
+  // 終了したページ（覆いが出ている）からもスワイプで離れられるよう、
+  // ゲーム側の押下とは独立に追跡する
+  let pageSwipe = null;
+  wrapEl.addEventListener('pointerdown', (e) => {
+    if (!e.isPrimary) return;
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    if (pages.length <= 1 || drag || warpDrag || pendingAct || pageSwipe) return;
+    // ドックのアプリ（ボタン）の上から始まる押下はスワイプにしない。
+    // ここでポインターを掴むと、離したときのクリックがボタンに
+    // 届かなくなり、アプリが開かなくなるため
+    if (e.target.closest && e.target.closest('button')) return;
+    // 終了ページのグレー覆いの上では、下にアイコンがあるかどうかは
+    // 関係なく、覆いの範囲（＝盤面）全体をスワイプの対象にする
+    // （2026-11-13 ユーザー指示）。覆いがイベントを受ける側になる
+    // ためマスは特定できないので、盤面の矩形に入っているかで見る
+    const endShown = state.status === 'lost'
+      || (state.status === 'won' && currentPage().charged);
+    if (endShown) {
+      const r = boardEl.getBoundingClientRect();
+      if (e.clientX >= r.left && e.clientX < r.right
+        && e.clientY >= r.top && e.clientY < r.bottom) {
+        // 覆いの上から始めたスワイプは、ポインターキャプチャを
+        // 使わない（noCapture：覆いを起点にキャプチャすると、次の
+        // 操作が pointercancel になってしまうことを実測で確認）。
+        // ページ切り替えも離した瞬間に遅らせる（deferSwitch）
+        pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false, deferSwitch: true, pendingDir: 0, noCapture: true };
+      }
+      return;
+    }
+    const pos = cellFromPoint(e.clientX, e.clientY);
+    if (!pos) return;
+    if (pos.y >= state.rows - 1) return; // ドックの段は対象外
+    if (E.iconAt(state, pos.x, pos.y)) {
+      // アイコンの上から始まる押下は通常のスワイプにはしないが、
+      // フリック（速い横の振り）の候補として動きだけ記録しておき、
+      // 離した瞬間に判定する（2026-11-14夜 ユーザー選択の案1：
+      // スマホ準拠。ゆっくり動かせばアイコンのドラッグ、速い横
+      // フリックならページ移動にする）
+      pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false, flickWatch: true, dead: false, samples: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
+      return;
+    }
+    // ドックのアイコンは盤面のアイコンと同じ括りにする（2026-11-13
+    // ユーザー指示で chat1 が追加）：アプリのタイルからは始めない
+    if (e.target.closest && e.target.closest('.app-icon')) return;
+    pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false };
+  });
+  const onSwipeMove = (e) => {
+    if (!pageSwipe || e.pointerId !== pageSwipe.pointerId || pageSwipe.switched) return;
+    if (pageSwipe.flickWatch) {
+      // フリック候補は動きを記録するだけ（判定は離した瞬間）。
+      // 途中でタメや行き先ドラッグに化けた候補は外す
+      if (warpDrag || pendingAct) pageSwipe.dead = true;
+      pageSwipe.samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
+      if (pageSwipe.samples.length > 12) pageSwipe.samples.shift();
+      return;
+    }
+    const dx = e.clientX - pageSwipe.startX;
+    const dy = e.clientY - pageSwipe.startY;
+    // ある程度ドラッグしてからポインターを掴む（タップのクリックを
+    // 邪魔しないため）。掴んでおくと、盤面の端から外へはみ出す
+    // スワイプでも move を拾い続けられる
+    if (!pageSwipe.captured && !pageSwipe.noCapture && Math.abs(dx) >= 16) {
+      pageSwipe.captured = true;
+      try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+    }
+    if (Math.abs(dx) >= 56 && Math.abs(dx) > Math.abs(dy) * 1.4) {
+      pageSwipe.switched = true;
+      const dir = dx < 0 ? 1 : -1;
+      if (pageSwipe.deferSwitch) pageSwipe.pendingDir = dir;
+      else switchPage(pageIndex + dir);
+    }
+  };
+  wrapEl.addEventListener('pointermove', onSwipeMove);
+  // キャプチャを使わない追跡（覆いから始めたスワイプ）では、ポインター
+  // が盤面の外へ出ると move が届かなくなるため、window でも拾う
+  window.addEventListener('pointermove', (e) => {
+    if (pageSwipe && !pageSwipe.captured) onSwipeMove(e);
+  });
+  const endPageSwipe = (e) => {
+    if (!pageSwipe || e.pointerId !== pageSwipe.pointerId) return;
+    const done = pageSwipe;
+    pageSwipe = null;
+    if (done.captured) {
+      try { wrapEl.releasePointerCapture(done.pointerId); } catch (_) { /* noop */ }
+    }
+    // フリックの判定（アイコンの上から始めた候補のみ、離した瞬間に
+    // 行う）：横の移動量が盤面幅の3割以上あり、最後の100ミリ秒での
+    // 横の速さが 0.5px/ms 以上で横が縦の1.5倍以上ならページ移動。
+    // switchPage が進行中のドラッグを取り消すので、掴んでいた
+    // アイコンは元の位置に戻る。行き先のページが無い方向では
+    // switchPage が何もせず、通常のドロップがそのまま進む
+    if (done.flickWatch && e.type === 'pointerup' && !done.dead && !warpDrag && !pendingAct) {
+      const samples = done.samples.concat([{ x: e.clientX, y: e.clientY, t: performance.now() }]);
+      const dx = e.clientX - done.startX;
+      const boardW = boardEl.getBoundingClientRect().width;
+      if (Math.abs(dx) >= boardW * 0.3) {
+        const last = samples[samples.length - 1];
+        let first = samples[0];
+        for (const s of samples) { if (last.t - s.t <= 100) { first = s; break; } }
+        const dt = last.t - first.t;
+        if (dt >= 20) {
+          const vx = (last.x - first.x) / dt;
+          const vy = (last.y - first.y) / dt;
+          if (Math.abs(vx) >= 0.5 && Math.abs(vx) >= Math.abs(vy) * 1.5 && Math.sign(vx) === Math.sign(dx)) {
+            switchPage(pageIndex + (dx < 0 ? 1 : -1));
+          }
+        }
+      }
+    }
+    // 覆いから始めたスワイプの切り替えは、離した瞬間に実行する
+    if (e.type === 'pointerup' && done.pendingDir) {
+      switchPage(pageIndex + done.pendingDir);
+    }
+  };
+  wrapEl.addEventListener('pointerup', endPageSwipe);
+  window.addEventListener('pointerup', endPageSwipe);
+  wrapEl.addEventListener('pointercancel', endPageSwipe);
+  window.addEventListener('pointercancel', endPageSwipe);
+
   wrapEl.addEventListener('pointerdown', (e) => {
     if (state.status !== 'playing') return;
     // ドラッグ中の追加の押下は無視する。
     // マウスの右ボタンなど、主ボタン以外もドラッグ開始に使わない
     // （右クリック併用でドラッグ状態が壊れる不具合の対策）
-    if (drag) return;
+    if (drag || warpDrag || pendingAct) return;
     if (!e.isPrimary) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     removeGhost(); // 取り残しの掃除
@@ -415,37 +1592,21 @@
     if (!pos) return;
     // タップ判定用に押下を記録する（ドラッグにならなかった場合に使う）
     press = { pointerId: e.pointerId, cell: pos, handled: false };
-    // やる気ワープの行き先選び待ちなら、このタップが行き先になる。
-    // ワープ自身のマスやドックの列をタップしたら取り消し
-    if (warpChoice) {
-      const warpIcon = state.icons.find(i => i.id === warpChoice);
-      press.handled = true;
-      const choiceId = warpChoice;
-      warpChoice = null;
-      tapSel = null;
-      if (E.isReservedCell(pos.x, pos.y)) suppressDockClick = true;
-      if (warpIcon && !E.isReservedCell(pos.x, pos.y)
-        && !(pos.x === warpIcon.x && pos.y === warpIcon.y)) {
-        const wr = E.applyWarpSwap(state, choiceId, { x: pos.x, y: pos.y });
-        if (wr && wr.ok) playEventSounds(wr.events);
-      }
-      flipRender(state.icons, null);
-      return;
-    }
     const icon = E.iconAt(state, pos.x, pos.y);
     if (!icon || icon.z > 0) return;
+    // 導入フロー中は、範囲内（誘導中は対象）のアイコンだけ掴める
+    if (!tutOperableIcon(currentPage(), icon)) return;
     if (icon.mood === 'rebel') {
-      // 反抗アイコンはドラッグで持てるが、持った瞬間にランダムな位置へ
-      // 逃げてしまう（2026-11-09 ユーザー指定）。その場で発動し、ドラッグは始まらない
+      // 反抗アイコンは掴むと反抗マークが育ち始め、掴み続けると発動する
+      // （2026-11-12 ユーザー指定の演出・案3）。演出中に離したらキャンセル
       press.handled = true;
       tapSel = null;
-      const rr = E.applyRebelMove(state, icon.id);
-      if (rr && rr.ok) { seRebel(); playEventSounds(rr.events); }
-      flipRender(state.icons, null); // 通常の移動と同じく、滑って移動して見えるようにする
+      startPendingAct(icon, 'rebel', e.pointerId);
+      e.preventDefault();
       return;
     }
     if (icon.type === 'warp') {
-      // ワープは方向を持たず、掴む／タップで発動する（2026-11-12）。
+      // ワープは方向を持たず、掴んでタメると発動する（2026-11-12）。
       // ただし選択中のアイコンがいて、その移動先としてワープのマスが
       // タップされた場合は、発動ではなく通常のタップ移動として扱う
       if (tapSel && tapSel !== icon.id) {
@@ -459,26 +1620,41 @@
       press.handled = true;
       tapSel = null;
       if (icon.mood === 'eager') {
-        // やる気のときは行き先を自分で選ぶ。次のタップで決まる
-        warpChoice = icon.id;
-        tapSel = icon.id; // 選択中と同じ紫の枠で目印にする
-        render(state.icons, null);
+        // やる気のときは行き先を自分で選ぶ（2026-11-12 ユーザー指定で
+        // タップ方式からドラッグ方式に変更）：掴んで行き先のマスまで
+        // 引っぱり、離した瞬間に交換する。離すまでは盤面の他の
+        // アイコンは一切動かない
+        warpDrag = {
+          iconId: icon.id, pointerId: e.pointerId,
+          startX: e.clientX, startY: e.clientY,
+          active: false, ghost: null, hoverKey: null,
+        };
+        try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        e.preventDefault();
         return;
       }
-      const wr = E.applyWarpSwap(state, icon.id, null);
-      if (wr && wr.ok) playEventSounds(wr.events);
-      flipRender(state.icons, null);
+      // 通常時は掴むとタメ（ジャンプ前の予備動作）に入り、掴み続けると
+      // 発動する（2026-11-12 ユーザー指定の演出）。演出中に離したら
+      // キャンセル。やる気のときは上のドラッグ行き先選びになる
+      startPendingAct(icon, 'warp', e.pointerId);
+      e.preventDefault();
       return;
     }
     // 候補マスの集合は intent によらず共通（解決の仕方だけが変わる）ため、
     // 既定（merge）の候補を位置の一覧として使う
-    const dests = E.destinations(state, icon.id);
+    let dests = E.destinations(state, icon.id);
+    // 導入フロー中は、フローが許可する行き先だけに絞る
+    if (tutActive(currentPage())) {
+      dests = dests.filter(d => tutAllowsMove(currentPage(), icon.id, d));
+    }
     if (dests.length === 0) return;
+    const tutGuideNow = tutGuide(currentPage());
     drag = {
       iconId: icon.id, fromX: pos.x, fromY: pos.y,
       startX: e.clientX, startY: e.clientY, pointerId: e.pointerId,
       active: false, ghost: null, dests, target: null, targetKey: 'start',
       intent: 'swap',
+      tutKind: tutActive(currentPage()) && tutGuideNow ? tutGuideNow.kind : null,
     };
     // タップ選択はここでは消さない（離したときにタップとして処理するため）。
     // 実際にドラッグが始まった時点で、pointermove 側で選択を解除する
@@ -487,6 +1663,21 @@
   });
 
   wrapEl.addEventListener('pointermove', (e) => {
+    if (warpDrag) {
+      if (e.pointerId !== warpDrag.pointerId) return;
+      const wdx = e.clientX - warpDrag.startX;
+      const wdy = e.clientY - warpDrag.startY;
+      if (!warpDrag.active) {
+        if (Math.hypot(wdx, wdy) < 8) return;
+        warpDrag.active = true;
+        warpDrag.ghost = createDragGhost(warpDrag.iconId);
+        render(state.icons, warpDrag.iconId); // 持ったワープは盤面から消える
+      }
+      warpDrag.ghost.style.left = e.clientX + 'px';
+      warpDrag.ghost.style.top = e.clientY + 'px';
+      warpDragHover(e.clientX, e.clientY);
+      return;
+    }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
@@ -494,33 +1685,7 @@
       if (Math.hypot(dx, dy) < 8) return;
       drag.active = true;
       tapSel = null; // ドラッグが始まったらタップ選択は解除する
-      // ゴーストは盤面のアイコンそのもののコピーにして、大きさが変わらないようにする。
-      // 盤面用サイズはマス基準（cqw）で決まっているため、実測したピクセル値を写す。
-      const srcStack = wrapEl.querySelector(`.icon-stack[data-icon-id="${drag.iconId}"]`);
-      const ghost = document.createElement('div');
-      ghost.className = 'drag-ghost';
-      if (srcStack) {
-        const stackRect = srcStack.getBoundingClientRect();
-        const srcIcon = srcStack.querySelector('.app-icon');
-        const iconRect = srcIcon.getBoundingClientRect();
-        const clone = srcStack.cloneNode(true);
-        clone.style.transform = '';
-        clone.style.transition = '';
-        clone.style.width = stackRect.width + 'px';
-        clone.style.height = stackRect.height + 'px';
-        clone.style.containerType = 'size'; // ゴースト内でも cqw が盤面と同じ基準になるように
-        const cIcon = clone.querySelector('.app-icon');
-        cIcon.style.width = iconRect.width + 'px';
-        cIcon.style.height = iconRect.height + 'px';
-        cIcon.style.borderRadius = getComputedStyle(srcIcon).borderRadius;
-        cIcon.style.animation = 'none';
-        const srcArrow = srcIcon.querySelector('.arrow');
-        const cArrow = cIcon.querySelector('.arrow');
-        if (srcArrow && cArrow) cArrow.style.fontSize = getComputedStyle(srcArrow).fontSize;
-        ghost.appendChild(clone);
-      }
-      document.body.appendChild(ghost);
-      drag.ghost = ghost;
+      drag.ghost = createDragGhost(drag.iconId);
       render(state.icons, drag.iconId); // 持ったアイコンは盤面から消える
     }
     drag.ghost.style.left = e.clientX + 'px';
@@ -539,6 +1704,7 @@
     const target = drag.target;
     const intent = drag.intent;
     const iconId = drag.iconId;
+    const tutKind = drag.tutKind;
     const fromCell = { x: drag.fromX, y: drag.fromY };
     removeGhost();
     drag = null;
@@ -547,8 +1713,11 @@
       if (!cancelled) handleTap(fromCell);
       return;
     }
-    if (!cancelled && target) {
-      const r = E.applyMove(state, iconId, { x: target.x, y: target.y, intent });
+    if (!cancelled && target && tutAllowsMove(currentPage(), iconId, target)) {
+      // 誘導中の重ねる手は、重なり具合によらず合体として確定させる
+      const useIntent = tutKind === 'merge' ? 'merge' : intent;
+      const r = E.applyMove(state, iconId, { x: target.x, y: target.y, intent: useIntent });
+      tutAfterMove(currentPage(), r, target);
       playMoveSounds(r, target);
       flipRender(state.icons, null);
     } else {
@@ -560,6 +1729,16 @@
   // 盤面とウィンドウの両方で受ける（二重に呼ばれても害はない作り）。
   function onPointerUp(e) {
     if (e.pointerType === 'mouse' && e.button !== 0) return; // 右ボタンの解放では終わらない
+    if (pendingAct) {
+      if (e.pointerId !== pendingAct.pointerId) return;
+      cancelPendingAct(); // 演出中に離したら発動はキャンセル
+      return;
+    }
+    if (warpDrag) {
+      if (e.pointerId !== warpDrag.pointerId) return;
+      finishWarpDrag(e.clientX, e.clientY);
+      return;
+    }
     if (drag) {
       if (e.pointerId !== drag.pointerId) return;
       press = null;
@@ -574,6 +1753,16 @@
     }
   }
   function onPointerCancel(e) {
+    if (pendingAct) {
+      if (e.pointerId !== pendingAct.pointerId) return;
+      cancelPendingAct();
+      return;
+    }
+    if (warpDrag) {
+      if (e.pointerId !== warpDrag.pointerId) return;
+      cancelWarpDrag();
+      return;
+    }
     if (drag && e.pointerId !== drag.pointerId) return;
     press = null;
     if (!drag) return;
@@ -588,9 +1777,11 @@
   // ポインターキャプチャを失ったら、ドラッグを中断して表示を戻す
   wrapEl.addEventListener('lostpointercapture', (e) => {
     if (drag && e.pointerId === drag.pointerId) cancelDrag();
+    if (warpDrag && e.pointerId === warpDrag.pointerId) cancelWarpDrag();
+    if (pendingAct && e.pointerId === pendingAct.pointerId) cancelPendingAct();
   });
   // ウィンドウがフォーカスを失ったら中断する
-  window.addEventListener('blur', () => { press = null; if (drag) cancelDrag(); });
+  window.addEventListener('blur', () => { press = null; if (drag) cancelDrag(); if (warpDrag) cancelWarpDrag(); cancelPendingAct(); });
   // 右クリックメニューは出さない（メニューが開くと離す操作が吸われてしまうため）。
   // ドラッグ中に盤面の外で出そうになった場合も、メニューを止めてドラッグを中断する
   wrapEl.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -627,27 +1818,33 @@
           || E.destinations(state, tapSel, 'swap').some(d => d.x === pos.x && d.y === pos.y);
         if (reachable) {
           tapSel = null;
-          const r = E.applyMove(state, sel.id, { x: pos.x, y: pos.y });
-          playMoveSounds(r, pos);
+          if (tutAllowsMove(currentPage(), sel.id, pos)) {
+            const r = E.applyMove(state, sel.id, { x: pos.x, y: pos.y });
+            tutAfterMove(currentPage(), r, pos);
+            playMoveSounds(r, pos);
+          }
           flipRender(state.icons, null);
           return;
         }
         // 届かない相手なら、動けるアイコンであれば選択をそちらへ移す
-        if (icon.z === 0 && icon.mood !== 'rebel') { selectIcon(icon.id); return; }
+        if (icon.z === 0 && icon.mood !== 'rebel'
+          && tutOperableIcon(currentPage(), icon)) { selectIcon(icon.id); return; }
         clearSelection();
         return;
       }
       // 空きマス: 移動先として成立すればそのまま移動する（合体は起きない）
       const dest = E.destinations(state, tapSel, 'swap').find(d => d.x === pos.x && d.y === pos.y);
       tapSel = null;
-      if (dest) {
+      if (dest && tutAllowsMove(currentPage(), sel.id, pos)) {
         const r = E.applyMove(state, sel.id, { x: pos.x, y: pos.y });
+        tutAfterMove(currentPage(), r, pos);
         playMoveSounds(r, pos);
       }
       flipRender(state.icons, null);
       return;
     }
-    if (icon && icon.z === 0 && icon.mood !== 'rebel') selectIcon(icon.id);
+    if (icon && icon.z === 0 && icon.mood !== 'rebel'
+      && tutOperableIcon(currentPage(), icon)) selectIcon(icon.id);
   }
 
   // 壁紙：デフォルトはプリセット13番。プレイヤーは用意された壁紙か自分の写真を選べる。
@@ -749,28 +1946,34 @@
   ).join('');
   document.querySelectorAll('.wallpaper-thumb').forEach(el => {
     el.addEventListener('click', () => {
+      const prev = wallpaperState;
       wallpaperState = { kind: 'preset', id: Number(el.dataset.presetId) };
       saveWallpaperState();
       applyWallpaper();
+      achOnWallpaper(prev);
       closeSheets();
     });
   });
   document.getElementById('wallpaperPhotoBtn').addEventListener('click', () => wallpaperInput.click());
   document.getElementById('wallpaperDefaultBtn').addEventListener('click', () => {
+    const prev = wallpaperState;
     wallpaperState = { kind: 'preset', id: DEFAULT_PRESET_ID };
     try { localStorage.removeItem(WALLPAPER_KEY); } catch (_) { /* noop */ }
     applyWallpaper();
+    achOnWallpaper(prev);
     closeSheets();
   });
   wallpaperInput.addEventListener('change', async () => {
     const file = wallpaperInput.files && wallpaperInput.files[0];
     wallpaperInput.value = '';
     if (!file) return;
+    const prev = wallpaperState;
     try {
       const dataUrl = await fileToWallpaperDataUrl(file);
       wallpaperState = { kind: 'photo', data: dataUrl };
       saveWallpaperState();
       applyWallpaper();
+      achOnWallpaper(prev);
       closeSheets();
     } catch (_) { /* 読み込めない画像では何もしない */ }
   });
@@ -831,6 +2034,14 @@
   let bgmBuffer = null;
   let bgmSource = null;
   let bgmLoading = null;
+  let bgmCtxEverRan = false;
+  // 再生したくても context がまだ running でないため待っている状態。
+  // running になった瞬間に statechange 側で開始する（非同期の読み込みが
+  // 終わった時点で止まっている context に source を start してしまうと、
+  // その source が残り続けて二度と鳴らなくなるため）
+  let bgmPending = false;
+  // 割り込みでオフにする処理は設定 UI 側で割り当てる
+  let audioInterruptHook = () => {};
   // 音の土台。BGM と効果音は別々の音量（bgmGain / seBus）を通り、
   // 最後にコンプレッサーでまとめてから出す（音量を分けたら効果音まで
   // BGM の音量に引きずられる配線になっていたのを、実機の指摘で修正）。
@@ -842,8 +2053,17 @@
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return null;
     try {
+      // 閉じられた context は使い回さない（参照が残っていると全ての
+      // 再生処理が無言で失敗し続ける）
+      if (bgmCtx && bgmCtx.state === 'closed') {
+        bgmCtx = null; bgmGain = null; seBus = null; bgmTrim = null; bgmComp = null;
+        bgmSource = null; bgmPending = false; bgmCtxEverRan = false;
+      }
       if (!bgmCtx) {
         bgmCtx = new AC();
+        // iOS のオーディオセッションを再生用にする（対応ブラウザのみ）。
+        // これがないと端末側の都合で「許可はあるのに無音」になることがある
+        try { if ('audioSession' in navigator) navigator.audioSession.type = 'playback'; } catch (_) { /* noop */ }
         bgmComp = bgmCtx.createDynamicsCompressor();
         bgmComp.threshold.value = -20;
         bgmComp.knee.value = 18;
@@ -860,10 +2080,76 @@
         bgmTrim = bgmCtx.createGain();
         bgmTrim.gain.value = BGM_TRIM;
         bgmTrim.connect(bgmGain);
+        // ユーザー操作の中で作られた直後に無音のバッファを一度鳴らし、
+        // ブラウザの自動再生ロックをその場で外しておく（定番の unlock 手順）
+        try {
+          const unlockBuf = bgmCtx.createBuffer(1, 1, 22050);
+          const unlockSrc = bgmCtx.createBufferSource();
+          unlockSrc.buffer = unlockBuf;
+          unlockSrc.connect(bgmCtx.destination);
+          unlockSrc.start(0);
+        } catch (_) { /* noop */ }
+        // 他のアプリ（YouTube 等）に音を奪われて context が止まったら、
+        // 自動復帰はさせず、設定ごとオフにする（2026-11-12 ユーザーの
+        // 希望：割り込まれてもいいから、ちゃんとオフになること。
+        // その後オンにし直すと土台ごと作り直して必ず鳴る）。
+        // 一度も running になっていない context（起動直後など）は
+        // 割り込みとみなさない
+        const ctx = bgmCtx;
+        ctx.onstatechange = () => {
+          if (ctx !== bgmCtx) return;
+          if (ctx.state === 'running') {
+            bgmCtxEverRan = true;
+            // 止まっていた間に開始を待っていた BGM をここで始める
+            if (soundOn) kickBgm();
+            return;
+          }
+          // 止まった context にぶら下がっている source は信用できない
+          // （システムに止められても onended が来ないことがあり、参照が
+          // 残ると「再生中」の誤認で二度と鳴らなくなる）。必ず落とす
+          if (bgmSource) {
+            const stale = bgmSource;
+            bgmSource = null;
+            try { stale.disconnect(); } catch (_) { /* noop */ }
+          }
+          bgmPending = false;
+          if (bgmCtxEverRan && soundOn) audioInterruptHook();
+        };
       }
-      if (bgmCtx.state === 'suspended') bgmCtx.resume();
+      if (bgmCtx.state !== 'running') {
+        // resume の成否を待って、running になったら待っていた再生を始める。
+        // 失敗（割り込み継続中など）は握りつぶさず、次の操作でやり直す
+        const ctx = bgmCtx;
+        try {
+          const pr = ctx.resume();
+          if (pr && typeof pr.then === 'function') {
+            pr.then(() => { if (ctx === bgmCtx && ctx.state === 'running' && soundOn) kickBgm(); }).catch(() => { /* noop */ });
+          }
+        } catch (_) { /* noop */ }
+      }
     } catch (_) { return null; }
     return bgmCtx;
+  }
+  // BGM の開始に必要な段取り（buffer があれば再生、なければ読み込み）
+  function kickBgm() {
+    if (!soundOn) return;
+    if (bgmBuffer) tryStartBgmSource();
+    else loadBgm();
+  }
+  // buffer から再生 source を作る。context が running のときだけ start する。
+  // running でなければ pending にして、running 遷移（onstatechange）に任せる
+  function tryStartBgmSource() {
+    if (!soundOn || bgmSource || !bgmBuffer || !bgmCtx) return;
+    if (bgmCtx.state !== 'running') { bgmPending = true; return; }
+    bgmPending = false;
+    bgmSource = bgmCtx.createBufferSource();
+    const src = bgmSource;
+    // システム側に止められた場合も参照を落とす（誤認防止）
+    src.onended = () => { if (bgmSource === src) bgmSource = null; };
+    bgmSource.buffer = bgmBuffer;
+    bgmSource.loop = true;
+    bgmSource.connect(bgmTrim || bgmGain || bgmCtx.destination);
+    bgmSource.start();
   }
   // 公開版（Render の静的ホスティング）専用: BGM の音声ファイルは
   // 配信の仕組み上置けないため、公開用コピーでは base64 で埋め込む
@@ -875,31 +2161,77 @@
     for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
     return bytes.buffer;
   }
-  function bgmStart() {
-    if (!soundOn || bgmSource) return;
+  // BGM 本体の読み込みとデコード。デコードは再生用 context に依存しない
+  // 形（OfflineAudioContext）で行うので、ページ表示直後や設定オフの間でも
+  // 先に済ませられる。失敗しても握りつぶさず、次に呼ばれたとき必ず
+  // やり直す（bgmLoading を必ず戻す）
+  function loadBgm() {
+    if (bgmBuffer || bgmLoading) return;
     if (typeof fetch !== 'function') return;
-    if (!ensureCtx()) return;
-    const play = () => {
-      if (!soundOn || bgmSource || !bgmBuffer || !bgmCtx) return;
-      bgmSource = bgmCtx.createBufferSource();
-      bgmSource.buffer = bgmBuffer;
-      bgmSource.loop = true;
-      bgmSource.connect(bgmTrim || bgmGain || bgmCtx.destination);
-      bgmSource.start();
-    };
-    if (bgmBuffer) { play(); return; }
-    if (!bgmLoading) {
-      bgmLoading = Promise.resolve(bgmEmbeddedBytes())
-        .then(ab => bgmCtx.decodeAudioData(ab))
-        .then(buf => { bgmBuffer = buf; bgmLoading = null; play(); })
-        .catch(() => { bgmLoading = null; });
+    let myLoad;
+    myLoad = Promise.resolve(bgmEmbeddedBytes())
+      .then(ab => decodeBgmData(ab))
+      .then(buf => {
+        if (bgmLoading === myLoad) bgmLoading = null;
+        bgmBuffer = buf;
+        tryStartBgmSource();
+      })
+      .catch(err => {
+        if (bgmLoading === myLoad) bgmLoading = null;
+        try { console.warn('BGM の読み込みに失敗しました。次の操作で再試行します', err); } catch (_) { /* noop */ }
+      });
+    bgmLoading = myLoad;
+  }
+  function decodeBgmData(ab) {
+    const Offline = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+    if (Offline) {
+      try {
+        return new Offline(2, 44100, 44100).decodeAudioData(ab)
+          .catch(() => {
+            const ctx = ensureCtx();
+            if (!ctx) throw new Error('no audio context');
+            return ctx.decodeAudioData(ab);
+          });
+      } catch (_) { /* 下の通常デコードへ */ }
     }
+    const ctx = ensureCtx();
+    if (!ctx) return Promise.reject(new Error('no audio context'));
+    return ctx.decodeAudioData(ab);
+  }
+  function bgmStart() {
+    if (!soundOn) return;
+    // 既存 source があるだけでは何もしない、にしない。まず土台を
+    // 起こし直し（resume）に行き、止まっているなら source は落として
+    // 作り直す。従来は bgmSource の有無だけで早期 return していたため、
+    // 止まった source が残ると resume すら試されず無音のままだった
+    const ctx = ensureCtx();
+    if (!ctx) return;
+    if (bgmSource && ctx.state !== 'running') {
+      const stale = bgmSource;
+      bgmSource = null;
+      try { stale.disconnect(); } catch (_) { /* noop */ }
+    }
+    if (bgmSource) return;
+    kickBgm();
   }
   function bgmStop() {
+    bgmPending = false;
     if (!bgmSource) return;
-    try { bgmSource.stop(); } catch (_) { /* noop */ }
-    try { bgmSource.disconnect(); } catch (_) { /* noop */ }
+    const src = bgmSource;
     bgmSource = null;
+    try { src.stop(); } catch (_) { /* noop */ }
+    try { src.disconnect(); } catch (_) { /* noop */ }
+  }
+
+  // 音の土台を丸ごと作り直す。割り込みで止まった context は resume
+  // しても Safari では鳴り直さないことがあるため、オンにし直すときは
+  // 古い context を閉じて新品に替える（bgmBuffer は context に
+  // 依存しないので使い回せる）
+  function resetAudio() {
+    const old = bgmCtx;
+    bgmCtx = null; bgmGain = null; seBus = null; bgmTrim = null; bgmComp = null;
+    bgmSource = null; bgmLoading = null; bgmCtxEverRan = false; bgmPending = false;
+    if (old) { try { old.close(); } catch (_) { /* noop */ } }
   }
 
   // 効果音（2026-11-11 ユーザー決定：評価して「本当に必要」と
@@ -982,6 +2314,7 @@
   }
   function playMoveSounds(result, dest) {
     if (!result || !result.ok) return;
+    achOnMove(result);
     if (result.merged) {
       let count = 2;
       const at = dest ? state.icons.find(i => i.x === dest.x && i.y === dest.y) : null;
@@ -1008,9 +2341,20 @@
     soundOn = !soundOn;
     try { localStorage.setItem(SOUND_KEY, soundOn ? 'on' : 'off'); } catch (_) { /* noop */ }
     syncSoundBtn();
-    if (soundOn) bgmStart(); else bgmStop();
+    // オンにし直すときは土台ごと作り直す（割り込みで壊れた
+    // context のままでは鳴らないため）
+    if (soundOn) { resetAudio(); bgmStart(); seBuy(); } else bgmStop();
   });
   syncSoundBtn();
+  // 割り込みで context が止まったら、設定ごとオフにする
+  function applySoundOff() {
+    if (!soundOn) return;
+    soundOn = false;
+    try { localStorage.setItem(SOUND_KEY, 'off'); } catch (_) { /* noop */ }
+    syncSoundBtn();
+    bgmStop();
+  }
+  audioInterruptHook = applySoundOff;
   // 音量スライダー（BGM／効果音の2本）：動かした瞬間に反映し、離したときに保存する
   function wireVolumeSlider(slider, label, key, get, set, gainNode) {
     const sync = () => {
@@ -1034,7 +2378,31 @@
   wireVolumeSlider(
     document.getElementById('seVolumeSlider'), document.getElementById('seVolumeValue'),
     SE_VOLUME_KEY, () => seVolume, (v) => { seVolume = v; }, () => seBus);
-  wrapEl.addEventListener('pointerdown', () => { if (soundOn) bgmStart(); });
+  // 音の再試行は「画面のどこを触っても」行う。従来は盤面（.board-wrap）
+  // の pointerdown だけがトリガーで、設定シート（盤面の外）で音を
+  // 確かめている間は、読み込み失敗や resume の取りこぼしがあっても
+  // 二度とやり直されず、設定オンのまま無音になっていた。
+  // あわせて、最初のタップで BGM 本体の読み込みとデコードだけは
+  // 音がオフでも先に済ませる（オンにした瞬間に非同期待ちを挟まず、
+  // そのタップの中で再生を始められるようにするため）
+  document.addEventListener('pointerdown', () => {
+    loadBgm();
+    if (soundOn) bgmStart();
+  }, { passive: true });
+  document.addEventListener('keydown', () => { if (soundOn) bgmStart(); });
+  // タブやアプリに戻ってきたときの健全性チェック：
+  // running なら再生が止まっていないか確認して直し、一度鳴った後に
+  // 止まっているなら割り込みとしてオフにし（statechange が届かない
+  // 環境向けの保険）、まだ一度も鳴っていないだけなら復帰を試みる
+  function audioReturnCheck() {
+    if (!soundOn || !bgmCtx) return;
+    if (bgmCtx.state === 'running') kickBgm();
+    else if (bgmCtxEverRan) audioInterruptHook();
+    else bgmStart();
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) audioReturnCheck(); });
+  window.addEventListener('pageshow', audioReturnCheck);
+  window.addEventListener('focus', audioReturnCheck);
 
   // 設定アプリ：開くと項目が並び、「初期化」でゲームを最初からにする
   const settingsSheet = document.getElementById('settingsSheet');
@@ -1045,7 +2413,6 @@
     wallpaperSheet.hidden = true;
   });
   wrapEl.addEventListener('click', (e) => {
-    if (suppressDockClick) { suppressDockClick = false; return; }
     if (e.target.closest && e.target.closest('.settings-app')) {
       settingsSheet.hidden = false;
     }
@@ -1057,7 +2424,280 @@
       renderStore();
       storeSheet.hidden = false;
     }
+    if (e.target.closest && e.target.closest('.trophy-app')) {
+      // 実績画面を開いたら赤丸を消す
+      if (achData.unseen > 0) { achData.unseen = 0; achSave(); updateAchDot(); }
+      renderAchievements();
+      trophySheet.hidden = false;
+    }
   });
+
+  // 実績（トロフィーアプリ）：解除状態と通算カウンタは端末に保存する。
+  // 隠し実績は、解除されるまで名前も条件も「？？？」で表示し、
+  // 解除されたら名前と条件が見られるようになる（2026-11-13 ユーザー指定）。
+  // 消灯はリアルタイム制の導入（同日）で達成可能になったため追加した
+  const ACH_KEY = 'homeMerge.achievements.v1';
+  const ACH_DEFS = [
+    { id: 'firstMove', group: '通常', name: '初出勤', desc: '初めてアイコンを移動させる' },
+    { id: 'firstMerge', group: '通常', name: 'はじめの一歩', desc: '初めて合体する' },
+    { id: 'firstEager', group: '通常', name: 'ごきげんよう', desc: '初めてやる気状態になる' },
+    { id: 'firstRebel', group: '通常', name: '不良社員', desc: '初めて反抗状態になる' },
+    { id: 'merges10', group: '通常', name: '二人三脚', desc: '1回のプレイで10回合体する' },
+    { id: 'count3', group: '通常', name: '若手', desc: '数3のアイコンを作る' },
+    { id: 'count4', group: '通常', name: '中堅', desc: '数4のアイコンを作る' },
+    { id: 'wakes30', group: '通常', name: '寝る子は育つ', desc: '1回のプレイで、アイコンが目覚めるのが累計30回になる' },
+    { id: 'firstClear', group: '通常', name: '電池切れ', desc: '初めてクリアする' },
+    { id: 'merges20', group: '中級', name: '大所帯', desc: '1回のプレイで20回合体する' },
+    { id: 'count5', group: '中級', name: '大器晩成', desc: '数5のアイコンを作る' },
+    { id: 'eagerMoves5', group: '中級', name: '仕事熱心', desc: '1回のプレイで、やる気状態のアイコンを5回動かす' },
+    { id: 'convertTotal10', group: '中級', name: '染色職人', desc: 'やる気の変換でアイコンを通算10個変える' },
+    { id: 'convert3', group: '中級', name: '右へ倣え', desc: '1回の移動で3個以上のアイコンを別の種類に変える' },
+    { id: 'rebels10', group: '中級', name: '反抗期', desc: '1回のプレイで反抗が10回発生する' },
+    { id: 'icons10', group: '中級', name: '大掃除', desc: '盤面のアイコンを10個以下にする' },
+    { id: 'swaps50', group: '中級', name: '引っ越し名人', desc: '1回のプレイで50回入れ替える' },
+    { id: 'move5', group: '中級', name: '長距離通勤', desc: '1回の移動で5マス動く' },
+    { id: 'merges30', group: '上級', name: '大企業', desc: '1回のプレイで30回合体する' },
+    { id: 'count6', group: '上級', name: '限界突破', desc: '数6のアイコンを作る' },
+    { id: 'onePole', group: '上級', name: '一極集中', desc: '1個のアイコンの数が、盤面全体の数の合計の半分以上になる' },
+    { id: 'fourKings', group: '上級', name: '四天王', desc: '1回のプレイで、4種類すべてで数4以上のアイコンを作る' },
+    { id: 'comeback', group: '上級', name: '九死に一生', desc: '空きマスが残り1マスになってから、5マス以上空ける' },
+    { id: 'icons5', group: '上級', name: 'ミニマリスト', desc: '盤面のアイコンを5個以下にする' },
+    { id: 'clearLean', group: '上級', name: '断捨離', desc: '盤面のアイコン10個以下でクリアする' },
+    { id: 'clearOneType', group: '上級', name: '偏愛', desc: '盤面に1種類しか残さずクリアする' },
+    { id: 'fullTrain', group: '隠し', name: '満員電車', desc: '空きマスが残り1マスになる' },
+    { id: 'wakeRush', group: '隠し', name: '起床ラッシュ', desc: '3個以上のアイコンが同時に目覚める' },
+    { id: 'lightsOut', group: '隠し', name: '消灯', desc: '盤面上のすべてのアイコンが同時に眠っている状態になる' },
+    { id: 'lastWork', group: '隠し', name: '最後の一仕事', desc: 'バッテリー残り1%の最後の1手で合体してクリアする' },
+    { id: 'revolution', group: '隠し', name: '革命', desc: '1回の移動で、3種類以上の異なるアイコンを同じ種類に変える' },
+    { id: 'nightOwl', group: '隠し', name: '夜更かし', desc: 'プレイ中に日付が変わる瞬間をまたぐ' },
+    { id: 'wallpaper', group: 'アプリ', name: '衣替え', desc: '壁紙を変更する' },
+    { id: 'wallpaperPhoto', group: 'アプリ', name: 'お気に入り', desc: '自分の写真を壁紙に設定する' },
+    { id: 'howto', group: 'アプリ', name: '予習', desc: '検索アプリで遊び方を開く' },
+    { id: 'buyWarp', group: 'アプリ', name: '瞬間移動', desc: 'ストアでワープを購入する' },
+    { id: 'buySpin', group: 'アプリ', name: '黄金の回転', desc: 'ストアでスピンを購入する' },
+    { id: 'buyOu', group: 'アプリ', name: '即位', desc: 'ストアでオウを購入する' },
+    { id: 'buyAll', group: 'アプリ', name: '大人買い', desc: '1回のプレイで特殊アイコンをすべて購入する' },
+  ];
+  const ACH_GROUPS = ['通常', '中級', '上級', '隠し', 'アプリ'];
+  // unseen は「解除されたのに実績画面をまだ開いていない」件数。
+  // 0でなければドックの実績アイコンに赤丸が出る（2026-11-13 ユーザー指示）
+  let achData = { unlocked: {}, totals: { conversions: 0 }, unseen: 0 };
+  try {
+    const raw = localStorage.getItem(ACH_KEY);
+    if (raw) {
+      const p = JSON.parse(raw);
+      if (p && p.unlocked) achData.unlocked = p.unlocked;
+      if (p && p.totals && typeof p.totals.conversions === 'number') achData.totals.conversions = p.totals.conversions;
+      if (p && typeof p.unseen === 'number') achData.unseen = p.unseen;
+    }
+  } catch (_) { /* 保存が読めなくても実績なしで続ける */ }
+  function updateAchDot() {
+    const app = document.querySelector('.trophy-app');
+    if (!app) return;
+    app.classList.toggle('has-unseen', achData.unseen > 0);
+    // バッジはストアのコインバッジと同じ形式（赤丸に数字）で件数を出す
+    const dot = app.querySelector('.ach-dot');
+    if (dot) dot.textContent = achData.unseen > 0 ? String(achData.unseen) : '';
+  }
+  function achSave() {
+    try { localStorage.setItem(ACH_KEY, JSON.stringify(achData)); } catch (_) { /* noop */ }
+  }
+  // ラン（1プレイ）単位の集計と、前回の盤面位置の控え（入れ替え回数の数え用）
+  let achRun = null;
+  let achPos = new Map();
+  let achRunDate = new Date().toDateString();
+  function achNewRun() {
+    achRun = { merges: 0, swaps: 0, wakes: 0, rebels: 0, eagerMoves: 0, typeMax: {}, wasOneEmpty: false };
+    achPos = new Map(state.icons.map(ic => [ic.id, ic.x + ',' + ic.y]));
+    achRunDate = new Date().toDateString();
+  }
+  // 解除の通知：スマホの通知バナーのように上から出す。複数同時に
+  // 解除されたら1つずつ順番に出す
+  const achToastEl = document.getElementById('achToast');
+  const achToastNameEl = document.getElementById('achToastName');
+  const achToastQueue = [];
+  let achToastBusy = false;
+  function showAchToast(name) {
+    achToastQueue.push(name);
+    if (achToastBusy) return;
+    achToastBusy = true;
+    const next = () => {
+      const n = achToastQueue.shift();
+      if (n === undefined) { achToastBusy = false; return; }
+      achToastNameEl.textContent = n;
+      achToastEl.hidden = false;
+      setTimeout(() => { achToastEl.hidden = true; setTimeout(next, 200); }, 2800);
+    };
+    next();
+  }
+  function seAchievement() {
+    seTone({ freq: 1567.98, type: 'triangle', dur: 0.10, peak: 0.22 });
+    seTone({ freq: 2093.00, type: 'triangle', delay: 0.07, dur: 0.16, peak: 0.22 });
+  }
+  function achUnlock(id) {
+    if (achData.unlocked[id]) return;
+    const def = ACH_DEFS.find(d => d.id === id);
+    if (!def) return;
+    achData.unlocked[id] = Date.now();
+    achData.unseen++;
+    achSave();
+    updateAchDot();
+    seAchievement();
+    showAchToast(def.name);
+  }
+  // イベントの束から判定するもの（移動とリアルタイム tick で共用）
+  function achProcessEvents(events) {
+    let wakes = 0;
+    const conv = [];
+    for (const ev of events) {
+      if (ev.kind === 'wake') {
+        wakes++;
+        if (ev.mood === 'eager') { achUnlock('firstEager'); moodIntroNotice('eager', ev.iconId); }
+        if (ev.mood === 'rebel') { achUnlock('firstRebel'); achRun.rebels++; moodIntroNotice('rebel', ev.iconId); }
+      } else if (ev.kind === 'eagerConsumed') {
+        achRun.eagerMoves++;
+      } else if (ev.kind === 'converted') {
+        conv.push(ev);
+      }
+    }
+    achRun.wakes += wakes;
+    if (wakes >= 3) achUnlock('wakeRush');
+    if (achRun.wakes >= 30) achUnlock('wakes30');
+    if (achRun.rebels >= 10) achUnlock('rebels10');
+    if (achRun.eagerMoves >= 5) achUnlock('eagerMoves5');
+    if (conv.length) {
+      achData.totals.conversions += conv.length;
+      achSave();
+      if (achData.totals.conversions >= 10) achUnlock('convertTotal10');
+      if (conv.length >= 3) achUnlock('convert3');
+      if (new Set(conv.map(e => e.from)).size >= 3) achUnlock('revolution');
+    }
+  }
+  // 盤面の状態から判定するもの（移動と tick で共用）
+  function achBoardChecks() {
+    const icons = state.icons;
+    let maxCount = 0;
+    let sum = 0;
+    for (const ic of icons) {
+      if (ic.count > maxCount) maxCount = ic.count;
+      sum += ic.count;
+      if (!E.TYPES[ic.type].special && ic.count > (achRun.typeMax[ic.type] || 0)) {
+        achRun.typeMax[ic.type] = ic.count;
+      }
+    }
+    if (maxCount >= 3) achUnlock('count3');
+    if (maxCount >= 4) achUnlock('count4');
+    if (maxCount >= 5) achUnlock('count5');
+    if (maxCount >= 6) achUnlock('count6');
+    if (E.TYPE_IDS.filter(t => !E.TYPES[t].special).every(t => (achRun.typeMax[t] || 0) >= 4)) achUnlock('fourKings');
+    if (icons.length >= 2 && maxCount * 2 >= sum) achUnlock('onePole');
+    if (icons.length <= 10) achUnlock('icons10');
+    if (icons.length <= 5) achUnlock('icons5');
+    if (icons.length && icons.every(ic => ic.z > 0)) achUnlock('lightsOut');
+    const empties = E.emptyCells(state).length;
+    if (empties === 1) { achUnlock('fullTrain'); achRun.wasOneEmpty = true; }
+    if (achRun.wasOneEmpty && empties >= 6) achUnlock('comeback');
+  }
+  function achSnapshot() {
+    achPos = new Map(state.icons.map(ic => [ic.id, ic.x + ',' + ic.y]));
+  }
+  // 移動が確定するたびに呼ばれる判定の本体。result はエンジンの
+  // 移動結果（applyMove / applyRebelMove / applyWarpSwap のどれでもよい）
+  function achOnMove(result) {
+    if (!result || !result.ok || !achRun) return;
+    const events = result.events || [];
+    achUnlock('firstMove');
+    // 入れ替え回数：位置が変わったアイコンの数から、自分で動いた分
+    // （合体のときは消えるので0、それ以外は自分1個）を引く
+    let changed = 0;
+    for (const ic of state.icons) {
+      const prev = achPos.get(ic.id);
+      if (prev && prev !== ic.x + ',' + ic.y) changed++;
+    }
+    achRun.swaps += Math.max(0, changed - (result.merged ? 0 : 1));
+    if (achRun.swaps >= 50) achUnlock('swaps50');
+    if (result.steps >= 5) achUnlock('move5');
+    if (result.merged) {
+      achRun.merges++;
+      achUnlock('firstMerge');
+      if (achRun.merges >= 10) achUnlock('merges10');
+      if (achRun.merges >= 20) achUnlock('merges20');
+      if (achRun.merges >= 30) achUnlock('merges30');
+    }
+    achProcessEvents(events);
+    achBoardChecks();
+    if (events.some(e => e.kind === 'won')) {
+      achUnlock('firstClear');
+      if (state.icons.length <= 10) achUnlock('clearLean');
+      if (new Set(state.icons.map(i => i.type)).size === 1) achUnlock('clearOneType');
+      if (result.merged) achUnlock('lastWork');
+    }
+    achSnapshot();
+  }
+  // リアルタイム tick のたびに呼ばれる判定（tick でも目覚めや
+  // 満杯が起きるため、イベントと盤面の判定は移動と共用する）
+  function achOnTick(events) {
+    if (!achRun) return;
+    achProcessEvents(events || []);
+    achBoardChecks();
+    // バッテリー切れ（時間制）でのクリアも、移動でのクリアと同じ実績対象
+    if ((events || []).some(e => e.kind === 'won')) {
+      achUnlock('firstClear');
+      if (state.icons.length <= 10) achUnlock('clearLean');
+      if (new Set(state.icons.map(i => i.type)).size === 1) achUnlock('clearOneType');
+    }
+    achSnapshot();
+  }
+  function achOnPurchase(typeId) {
+    if (typeId === 'warp') achUnlock('buyWarp');
+    if (typeId === 'spin') achUnlock('buySpin');
+    if (typeId === 'ou') achUnlock('buyOu');
+    if (E.SPECIAL_IDS.every(id => state.purchased[id])) achUnlock('buyAll');
+  }
+  function achOnWallpaper(prev) {
+    const cur = wallpaperState;
+    const changed = !prev || prev.kind !== cur.kind
+      || (cur.kind === 'preset' ? prev.id !== cur.id : prev.data !== cur.data);
+    if (!changed) return;
+    achUnlock('wallpaper');
+    if (cur.kind === 'photo') achUnlock('wallpaperPhoto');
+  }
+  // 夜更かし：プレイ中に日付が変わったら達成。時計表示と同じく
+  // 1秒に1回、日付が変わったか比べるだけにする
+  setInterval(() => {
+    if (state.status !== 'playing') return;
+    const today = new Date().toDateString();
+    if (today !== achRunDate) {
+      achRunDate = today;
+      achUnlock('nightOwl');
+    }
+  }, 1000);
+  // 実績シート：解除済みは名前と条件、未解除の隠しは「？？？」
+  const trophySheet = document.getElementById('trophySheet');
+  const achSummaryEl = document.getElementById('achSummary');
+  const achListEl = document.getElementById('achList');
+  function renderAchievements() {
+    const done = ACH_DEFS.filter(d => achData.unlocked[d.id]).length;
+    achSummaryEl.textContent = `解除 ${done} / ${ACH_DEFS.length}`;
+    achListEl.innerHTML = ACH_GROUPS.map(g => {
+      const rows = ACH_DEFS.filter(d => d.group === g).map(d => {
+        const unlocked = !!achData.unlocked[d.id];
+        const hiddenLocked = g === '隠し' && !unlocked;
+        const name = hiddenLocked ? '？？？' : d.name;
+        let desc = hiddenLocked ? '？？？' : d.desc;
+        if (d.id === 'convertTotal10' && !unlocked) {
+          desc += `（通算 ${Math.min(achData.totals.conversions, 10)} / 10）`;
+        }
+        return `<div class="icon-row ach-row${unlocked ? ' done' : ''}"><span class="ach-mark" aria-hidden="true">${unlocked ? '🏆' : '🔒'}</span>`
+          + `<div><div class="icon-row-name">${name}</div><div class="icon-row-desc">${desc}</div></div></div>`;
+      }).join('');
+      return `<p class="wallpaper-group-title">${g}</p><div class="settings-list">${rows}</div>`;
+    }).join('');
+  }
+  document.getElementById('trophyBack').addEventListener('click', () => {
+    trophySheet.hidden = true;
+  });
+  achNewRun();
 
   // ストア：特殊アイコンをコインで買う。開いても手数や時計は進まない。
   // 買うと一番手前の空きマスに即座に置かれる（購入自体も1手に数えない）
@@ -1066,18 +2706,21 @@
   const storeListEl = document.getElementById('storeList');
   const STORE_DESCS = {
     warp: 'つかむと、盤上のどこかのマスと居場所を交換する。やる気のときは行き先を選べる',
-    kishi: 'ナイトの動きで跳ぶ。間のアイコンは全部飛び越える',
+    spin: 'Y字の3方向に、自分の数だけ動ける。動くたびに90度右に回って向きが変わる',
     ou: '全方向に動ける。オウ同士で合体すると数が増える',
   };
   function renderStore() {
     storeCoinsEl.textContent = String(state.coins);
     const noRoom = E.emptyCells(state).length === 0;
+    // ゲームオーバー後（とクリア後）は購入できない。エンジン側でも
+    // 拒否されるが、ボタン自体も無効にして見た目でも分かるようにする
+    const ended = state.status !== 'playing';
     storeListEl.innerHTML = E.SPECIAL_IDS.map(id => {
       const t = E.TYPES[id];
       const price = E.PRICES[id];
       const owned = !!state.purchased[id];
-      const disabled = owned || noRoom || state.coins < price;
-      const label = owned ? '購入済み' : noRoom ? '空きマスなし' : `${price}コインで購入`;
+      const disabled = owned || ended || noRoom || state.coins < price;
+      const label = owned ? '購入済み' : ended ? '終了しました' : noRoom ? '空きマスなし' : `${price}コインで購入`;
       return `<div class="icon-row store-row"><div class="icon-thumb"><div class="icon-stack"><div class="app-icon ${t.colorName} normal ${t.id}" style="--hop:1.6cqw">${iconArtwork(t)}</div></div></div>`
         + `<div class="store-texts"><div class="icon-row-name">${t.name}</div><div class="icon-row-desc">${STORE_DESCS[id]}</div></div>`
         + `<button class="store-buy" type="button" data-buy="${id}" ${disabled ? 'disabled' : ''}>${label}</button></div>`;
@@ -1087,6 +2730,7 @@
         const r = E.buySpecial(state, btn.dataset.buy);
         if (r.ok) {
           seBuy();
+          achOnPurchase(btn.dataset.buy);
           renderStore();
           flipRender(state.icons, null);
         }
@@ -1097,27 +2741,24 @@
     storeSheet.hidden = true;
   });
 
-  // 検索アプリ：検索バーを押すと候補（遊び方／方向アイコン）が出て、
-  // 候補を選ぶとそのページが開く
+  // 検索アプリ：検索エンジン風の画面（ロゴと入力欄を中央に置き、
+  // 候補は常時開いたまま。2026-11-15 ユーザー指示）。候補（遊び方／
+  // 方向アイコン）を選ぶとそのページが開く
   const searchSheet = document.getElementById('searchSheet');
   const searchHome = document.getElementById('searchHome');
-  const searchSuggestions = document.getElementById('searchSuggestions');
   const searchPages = { howto: document.getElementById('pageHowto'), icons: document.getElementById('pageIcons') };
   function showSearchHome() {
     searchHome.hidden = false;
-    searchSuggestions.hidden = true;
     for (const p of Object.values(searchPages)) p.hidden = true;
   }
   document.getElementById('searchBack').addEventListener('click', () => {
     searchSheet.hidden = true;
   });
-  document.getElementById('searchBar').addEventListener('click', () => {
-    searchSuggestions.hidden = !searchSuggestions.hidden;
-  });
   searchSheet.querySelectorAll('.suggestion').forEach(btn => {
     btn.addEventListener('click', () => {
       searchHome.hidden = true;
       for (const [key, p] of Object.entries(searchPages)) p.hidden = key !== btn.dataset.page;
+      if (btn.dataset.page === 'howto') achUnlock('howto');
     });
   });
   searchSheet.querySelectorAll('[data-back]').forEach(btn => {
@@ -1126,30 +2767,397 @@
   // 方向アイコンの一覧（本物のアイコンの絵＋名前＋動ける方向）
   const ICON_DESCS = {
     tate: '上と下に動く', yoko: '左と右に動く',
-    sayoku: '右上と左下に動く', uyoku: '左上と右下に動く',
+    sayoku: '左上と右下に動く', uyoku: '右上と左下に動く',
   };
   document.getElementById('iconList').innerHTML = E.TYPE_IDS.filter(id => !E.TYPES[id].special).map(id => {
     const t = E.TYPES[id];
     return `<div class="icon-row"><div class="icon-thumb"><div class="icon-stack"><div class="app-icon ${t.colorName} normal ${t.id}" style="--hop:1.6cqw">${iconArtwork(t)}</div></div></div>`
       + `<div><div class="icon-row-name">${t.name}</div><div class="icon-row-desc">${ICON_DESCS[id]}</div></div></div>`;
   }).join('');
+  // コースの時計（2026-11-13 ユーザー設計：リアルタイム制＋時間制
+  // バッテリー）。プレイ中のページだけ、1秒ごとに時計が進む：
+  // - バッテリー：batterySecPerPercent 秒ごとに1%減り、0でクリア
+  //   （他の判定より先に見る。手数では減らない）
+  // - 設置：コースの設置間隔ごとに新しいアイコンが1個入る
+  // - 眠り：設置とは切り離した個別タイマーで進む（2026-11-14夜
+  //   ユーザー決定）。眠ったアイコンごとに sleepSecPerZ 秒で z が
+  //   1減る。かつては設置と同期していたが、設置の直前に動かすと
+  //   休みがほぼ0秒になり即2回行動ができてしまうため切り離した
+  // ドラッグやタメの最中、シートを開いている間、タブが裏に回った間は
+  // 時計ごと止める（旧 tick の「見送り」と同じ考え方）
+  const confirmSheet = document.getElementById('confirmSheet');
+  function sheetsOpen() {
+    return [settingsSheet, searchSheet, wallpaperSheet, soundSheet,
+      storeSheet, trophySheet, confirmSheet, moodSheet].some(s => s && !s.hidden);
+  }
+  function anySheetOpen() {
+    // 機嫌紹介の「注目」中も時計を止める（処理が被らないように。
+    // moodSpotActive は機嫌紹介の節で宣言する）
+    return moodSpotActive || sheetsOpen();
+  }
+  function runClockSecond(page) {
+    const s = page.state;
+    const course = COURSES.find(c => c.id === page.courseId);
+    const t = page.elapsedSec;
+    const events = [];
+    // バッテリー（0になったらその時点でクリア。設置の満杯より先に判定）
+    if (s.config.batterySecPerPercent > 0 && t % s.config.batterySecPerPercent === 0) {
+      const r = E.tickBattery(s);
+      if (r.ok) events.push(...r.events);
+      if (s.status !== 'playing') { finishClockSecond(page, events); return false; }
+    }
+    // 眠りは設置と切り離した個別タイマー（2026-11-14夜 ユーザー決定）：
+    // 眠ったアイコンごとに、眠ってから sleepSecPerZ 秒たつと z が1減り、
+    // 0になったら目覚め抽選。設置のタイミングに合わせても、他の
+    // アイコンを動かしても、休みの長さは変わらない（即2回行動の防止）
+    const secPerZ = s.config.sleepSecPerZ || 3;
+    for (const icon of s.icons) {
+      if (icon.z <= 0) continue;
+      icon.sleepProgress = (icon.sleepProgress || 0) + 1;
+      while (icon.z > 0 && icon.sleepProgress >= secPerZ) {
+        icon.sleepProgress -= secPerZ;
+        E.advanceSleepOne(s, icon, events);
+      }
+      if (icon.z === 0) icon.sleepProgress = 0;
+    }
+    // 設置は従来どおりコースの間隔で（開始遅延がある間は入らない）
+    const delay = course.installDelaySec || 0;
+    if (course.installIntervalSec > 0 && t >= delay && (t - delay) % course.installIntervalSec === 0) {
+      const r = E.tickInstall(s);
+      if (r.ok) events.push(...r.events);
+    }
+    finishClockSecond(page, events);
+    return s.status === 'playing';
+  }
+  function finishClockSecond(page, events) {
+    if (events.length) {
+      playEventSounds(events);
+      achOnTick(events);
+    }
+    if (page.state.status === 'won') unlockNextPage();
+    if (events.some(e => e.kind === 'won' || e.kind === 'lost')) renderPageBar();
+    savePages(true);
+    if (page === currentPage()) {
+      // 盤面が変わる秒だけ全体を描き直す。何も起きない秒で盤面を
+      // 作り直すと、CSSアニメーション（眠りの揺れなど）が毎秒
+      // 最初から再生されてカクカクして見える（2026-11-13 ユーザー
+      // 指摘「秒針刻むみたいにカクカクしてる」）。バッテリーの数字
+      // だけは毎秒でも軽く更新する
+      if (events.length) render(state.icons, null);
+      else updateBatteryDisplay();
+    }
+  }
+  // 導入フローの間だけ、眠りを実時間で進める（2026-11-15 ユーザー
+  // 指示）：ゲームの時間は止まっていても、寝たアイコンは通常と同じ
+  // 3秒で目覚める。停止中の仕掛けが表に見えないようにするための扱い。
+  // 進め方は自由プレイの個別タイマーと同じで、機嫌は流れの間は
+  // 出さない（tutAfterMove と同じく通常に戻す）
+  function progressFlowSleep(page) {
+    const s = page.state;
+    const secPerZ = s.config.sleepSecPerZ || 3;
+    const events = [];
+    for (const icon of s.icons) {
+      if (icon.z <= 0) continue;
+      icon.sleepProgress = (icon.sleepProgress || 0) + 1;
+      while (icon.z > 0 && icon.sleepProgress >= secPerZ) {
+        icon.sleepProgress -= secPerZ;
+        E.advanceSleepOne(s, icon, events);
+      }
+      if (icon.z === 0) icon.sleepProgress = 0;
+    }
+    if (!events.some(e => e.kind === 'wake')) return false;
+    for (const icon of s.icons) {
+      if (icon.mood !== 'normal') icon.mood = 'normal';
+    }
+    savePages(true);
+    return true;
+  }
+  let clockLastAt = Date.now();
+  setInterval(() => {
+    const now = Date.now();
+    const dt = now - clockLastAt;
+    clockLastAt = now;
+    const page = currentPage();
+    if (!page || page.state.status !== 'playing') return;
+    if (!courseOf(page)) return; // 空っぽのページでは時計は動かない
+    // 流れが終わった直後の始末：最後のドラッグ中に溜まって流れの中で
+    // 消費しきれなかった眠りの時間は、自由プレイの時計が動く前に、
+    // 流れ側の扱い（機嫌を出さない）で消化する。ここを省くと、寝た
+    // アイコンの目覚めが自由プレイ側にこぼれて機嫌や説明カードが
+    // 出てしまい、終わりの案内文が隠れる
+    if (page._flowWasActive && !tutActive(page) && page.flowSleepMs >= 1000) {
+      let woke = false;
+      while (page.flowSleepMs >= 1000) {
+        page.flowSleepMs -= 1000;
+        if (progressFlowSleep(page)) woke = true;
+      }
+      if (woke) render(state.icons, null);
+    }
+    page._flowWasActive = tutActive(page);
+    if (tutActive(page) || tutGoalActive()) {
+      // 導入フロー中は時間を止める。ただし眠りだけは実時間で進める
+      // （上の progressFlowSleep）。ドラッグ中は進めた結果を描かず、
+      // 時間だけ溜めて離したときに反映する（自由プレイの時計と同じ）
+      if (!document.hidden) {
+        page.flowSleepMs = (page.flowSleepMs || 0) + dt;
+        if (!(drag || warpDrag || pendingAct)) {
+          let woke = false;
+          while (page.flowSleepMs >= 1000) {
+            page.flowSleepMs -= 1000;
+            if (progressFlowSleep(page)) woke = true;
+          }
+          if (woke) render(state.icons, null);
+        }
+      }
+      return;
+    }
+    if (document.hidden) return;
+    if (anySheetOpen()) return;
+    page.clockMs += dt;
+    // アイコンを持っている間（ドラッグ・行き先ドラッグ・タメ）は秒を
+    // 進めない。ただし時間は捨てずに溜めておき、離した瞬間に経過分を
+    // まとめて進める（設置・眠りの進行・バッテリーが一気に反映される）。
+    // 2026-11-14夜にユーザー指示で変更（以前は持っている間の時間は
+    // 数えない仕様だった）
+    if (drag || warpDrag || pendingAct) return;
+    while (page.clockMs >= 1000) {
+      page.clockMs -= 1000;
+      page.elapsedSec += 1;
+      if (!runClockSecond(page)) break;
+    }
+  }, 250);
+
+  /* ==== 機嫌の初回説明カード（2026-11-14 ユーザー決定） ====
+   * やる気・反抗は導入フローの間は出ない（tutAfterMove で通常に
+   * 戻す）ので、自由プレイで初めて目覚めについたときに一度だけ、
+   * 小さい専用カードで、実際の動きを再現したループアニメーションと
+   * 一緒に説明する。帯の案内文と重なる
+   * 心配がないよう、カードはシート扱い（anySheetOpen）にして、
+   * 開いている間は時計を止める。出したかどうかは端末に保存し、
+   * 初期化（homeMerge.* の全消去）で一緒に消える
+   * 2026-11-15 追加（ユーザー指示）：カードがいきなり出ると唐突
+   * なので、まずその状態になったアイコンを2秒注目させてから
+   * カードに入る（startMoodIntro） */
+  const MOOD_INTRO_KEY = 'homeMerge.moodIntro.v1';
+  let moodIntroSeen = {};
+  try {
+    const raw = localStorage.getItem(MOOD_INTRO_KEY);
+    if (raw) moodIntroSeen = JSON.parse(raw) || {};
+  } catch (_) { moodIntroSeen = {}; }
+  const moodSheet = document.getElementById('moodSheet');
+  // シートの開閉は render を伴わないので、このままではチュートリアル
+  // の重なり物（矢印・覆い・案内文）が開閉に追随できない。特に矢印は
+  // body 直下に置かれていてシートより手前に出るため、設定などを
+  // 開いたままにすると他のアプリの画面の上に残ってしまう
+  // （2026-11-14夜 ユーザー報告）。開閉のたびに作り直す
+  const tutOverlayObserver = new MutationObserver(() => syncTutUI());
+  [settingsSheet, searchSheet, wallpaperSheet, soundSheet,
+    storeSheet, trophySheet, confirmSheet, moodSheet].forEach(s => {
+    if (s) tutOverlayObserver.observe(s, { attributes: true, attributeFilter: ['hidden'] });
+  });
+  const moodDiagramEl = document.getElementById('moodDiagram');
+  const moodTitleEl = document.getElementById('moodTitle');
+  const moodTextEl = document.getElementById('moodText');
+  const moodQueue = [];
+  let moodCardOpen = false;
+  // 紹介の前に置く「注目」の状態（2026-11-15 ユーザー指示）：いきなり
+  // カードを出すと唐突なので、まずその状態になったアイコン以外を
+  // 暗くして2秒見せてからカードに入る。注目中は anySheetOpen
+  // 経由で時計が止まるため、別の目覚めなどの処理は被らない
+  // （同時に2つ出ることも防げる）
+  const moodDimEl = document.getElementById('moodDim');
+  const tutShadeEl = document.getElementById('tutShade');
+  const MOOD_SPOT_MS = 2000;
+  let moodSpotActive = false;
+  let moodSpotIconId = null;
+  const MOOD_INTRO = {
+    eager: {
+      title: 'やる気',
+      text: 'やる気を動かすと、\n入れ替わった相手が同じ種類になる',
+    },
+    rebel: {
+      title: '反抗',
+      text: '反抗は長押しで発動。\nまっすぐ飛んで、着いた先の\n相手を食べてしまう',
+    },
+  };
+  function moodThumb(typeId, mood, extra) {
+    const icon = {
+      id: 'mood-intro-' + typeId + '-' + mood + (extra || ''),
+      type: typeId, mood, z: 0, count: 1, x: -1, y: -1, orient: 0,
+    };
+    return `<div class="mood-thumb${extra ? ' ' + extra : ''}">${iconHTML(icon)}</div>`;
+  }
+  function moodDiagram(mood) {
+    if (mood === 'eager') {
+      // やる気のヨコが（本物と同じ跳ねる動きのまま）右のタテと
+      // 入れ替わり、タテがヨコに変わるまでをループ再生する
+      return '<div class="mood-stage mood-stage-eager">'
+        + '<div class="mood-slots"><span></span><span></span></div>'
+        + `<div class="mood-actor mood-actor-eager">${moodThumb('yoko', 'eager')}</div>`
+        + '<div class="mood-actor mood-actor-other">'
+        + `<span class="mood-face mood-face-before">${moodThumb('tate', 'normal')}</span>`
+        + `<span class="mood-face mood-face-after">${moodThumb('yoko', 'normal')}</span>`
+        + '</div></div>';
+    }
+    // 反抗のヨコが（本物と同じイラつく動きのまま）間を置いて
+    // 右端のタテへ飛び、食べてそのマスに着くまでをループ再生する
+    return '<div class="mood-stage mood-stage-rebel">'
+      + '<div class="mood-slots"><span></span><span></span><span></span></div>'
+      + `<div class="mood-actor mood-actor-rebel">${moodThumb('yoko', 'rebel')}</div>`
+      + `<div class="mood-actor mood-actor-target">${moodThumb('tate', 'normal')}</div>`
+      + '</div>';
+  }
+  function openMoodCard(mood) {
+    const def = MOOD_INTRO[mood];
+    if (!def) return;
+    moodIntroSeen[mood] = Date.now();
+    try { localStorage.setItem(MOOD_INTRO_KEY, JSON.stringify(moodIntroSeen)); } catch (_) { /* noop */ }
+    moodTitleEl.textContent = def.title;
+    moodTextEl.textContent = def.text;
+    moodDiagramEl.innerHTML = moodDiagram(mood);
+    moodSheet.hidden = false;
+    moodCardOpen = true;
+  }
+  // 注目：対象以外を暗くする（複製は置かない：2026-11-15
+  // ユーザー指示「普通に他を暗くしとけば相対的に目立つ」）。
+  // 画面全体に暗がりを敷き、盤面とドックの区分はその上に
+  // 出して、対象以外のタイルはタイルごとに暗くする。対象の
+  // タイルには何もしないので、相対的に目立つ。ドックは
+  // 区分ごと上に出るので暗くならない
+  function moodSpotlight(icon) {
+    const stack = wrapEl.querySelector(
+      `.icon-stack[data-icon-id="${icon.id}"]`);
+    if (!stack) return false;
+    moodSpotIconId = icon.id;
+    stack.classList.add('mood-target');
+    boardEl.classList.add('mood-dimming');
+    moodDimEl.hidden = false;
+    phoneEl.classList.add('mood-spotting');
+    return true;
+  }
+  // 再描画で対象の印が外れたら付け直す（render の最後で呼ばれる）
+  function markMoodTarget() {
+    if (moodSpotIconId == null) return;
+    const stack = wrapEl.querySelector(
+      `.icon-stack[data-icon-id="${moodSpotIconId}"]`);
+    if (stack) stack.classList.add('mood-target');
+  }
+  function moodSpotEnd() {
+    moodDimEl.hidden = true;
+    phoneEl.classList.remove('mood-spotting');
+    boardEl.classList.remove('mood-dimming');
+    boardEl.querySelectorAll('.icon-stack.mood-target')
+      .forEach(el => el.classList.remove('mood-target'));
+    moodSpotIconId = null;
+  }
+  // 注目の終わり：別のシートが開いていたら、閉じるまでカードを
+  // 出さずに待つ（処理が被らないように。時計は止まったまま）
+  function finishMoodSpot(entry) {
+    if (sheetsOpen()) {
+      setTimeout(() => finishMoodSpot(entry), 250);
+      return;
+    }
+    moodSpotEnd();
+    moodSpotActive = false;
+    openMoodCard(entry.mood);
+  }
+  // 紹介の1件分：注目（2秒）→カード、の順に進める。対象の
+  // アイコンがもういなければ、同じ機嫌の別のアイコンを注目し、
+  // それもいなければ注目なしでカードだけ出す
+  function startMoodIntro(entry) {
+    if (moodIntroSeen[entry.mood]) { nextMoodIntro(); return; }
+    const icon = state.icons.find(ic => ic.id === entry.iconId && ic.z === 0 && ic.mood === entry.mood)
+      || state.icons.find(ic => ic.z === 0 && ic.mood === entry.mood);
+    if (icon && moodSpotlight(icon)) {
+      moodSpotActive = true;
+      setTimeout(() => finishMoodSpot(entry), MOOD_SPOT_MS);
+      return;
+    }
+    openMoodCard(entry.mood);
+  }
+  function nextMoodIntro() {
+    const next = moodQueue.shift();
+    if (next) startMoodIntro(next);
+  }
+  // 目覚めイベント（achProcessEvents）から呼ばれる。流れの間と
+  // 終わったページでは出さず、「見た」ことにもしない。流れの最後の
+  // 手で抽選が当たっても通常に戻されるため、盤面に実際にその機嫌の
+  // アイコンがいることも確かめる
+  function moodIntroNotice(mood, iconId) {
+    if (!MOOD_INTRO[mood] || moodIntroSeen[mood]) return;
+    const page = currentPage();
+    if (!page || page.state.status !== 'playing') return;
+    if (tutActive(page)) return;
+    if (!state.icons.some(ic => ic.z === 0 && ic.mood === mood)) return;
+    if (moodCardOpen || moodSpotActive) {
+      if (!moodQueue.some(q => q.mood === mood)) moodQueue.push({ mood, iconId });
+      return;
+    }
+    startMoodIntro({ mood, iconId });
+  }
+  document.getElementById('moodOk').addEventListener('click', () => {
+    moodSheet.hidden = true;
+    moodCardOpen = false;
+    nextMoodIntro();
+  });
+
+  /* ==== 確認シート（リセット・初期化の警告に使う） ==== */
+  const confirmTitleEl = document.getElementById('confirmTitle');
+  const confirmTextEl = document.getElementById('confirmText');
+  const confirmOkBtn = document.getElementById('confirmOk');
+  const confirmCancelBtn = document.getElementById('confirmCancel');
+  let confirmCallback = null;
+  function openConfirm({ title, text, okLabel }, onOk) {
+    confirmTitleEl.textContent = title;
+    confirmTextEl.textContent = text;
+    confirmOkBtn.textContent = okLabel;
+    confirmCallback = onOk;
+    confirmSheet.hidden = false;
+  }
+  confirmCancelBtn.addEventListener('click', () => {
+    confirmCallback = null;
+    confirmSheet.hidden = true;
+  });
+  confirmOkBtn.addEventListener('click', () => {
+    const cb = confirmCallback;
+    confirmCallback = null;
+    confirmSheet.hidden = true;
+    if (cb) cb();
+  });
+
   document.getElementById('settingsBack').addEventListener('click', () => {
     settingsSheet.hidden = true;
   });
+  // 盤面のリセットは、終了したページの覆いにあるリセットのマークが
+  // 担うので、設定には置かない（2026-11-13 ユーザー指示で削除）
+  // 初期化：ゲーム全体を最初に戻す。誤操作防止に警告は2回出す
+  // （2026-11-13 ユーザー指示）
   document.getElementById('initBtn').addEventListener('click', () => {
-    resetWinOverlay();
-    state = E.createGame();
-    if (drag) { removeGhost(); drag = null; }
-    press = null;
-    tapSel = null;
-    warpChoice = null;
-    settingsSheet.hidden = true;
-    searchSheet.hidden = true;
-    wallpaperSheet.hidden = true;
-    soundSheet.hidden = true;
-    storeSheet.hidden = true;
-    render(state.icons, null);
+    openConfirm({
+      title: '初期化しますか',
+      text: '解放したページ、実績、すべてのページの盤面が消えて、チュートリアルからやり直しになります。',
+      okLabel: '初期化する',
+    }, () => {
+      openConfirm({
+        title: '本当に初期化しますか',
+        text: '最後の確認です。元には戻せません。サウンドや壁紙の設定も初期状態に戻ります。',
+        okLabel: '本当に初期化する',
+      }, () => {
+        wipingAll = true; // 以後の保存（beforeunload 含む）を止めてから消す
+        try {
+          const keys = [];
+          for (let i = 0; i < localStorage.length; i++) {
+            const k = localStorage.key(i);
+            if (k && k.startsWith('homeMerge.')) keys.push(k);
+          }
+          keys.forEach(k => localStorage.removeItem(k));
+        } catch (_) { /* noop */ }
+        location.reload();
+      });
+    });
   });
 
+  window.addEventListener('beforeunload', () => savePages(true));
+  renderPageBar();
   render(state.icons, null);
 })();
