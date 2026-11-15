@@ -17,9 +17,12 @@
  * それを受けて結果を計算する。将来フォルダ操作を足すときも、この意図の
  * 受け渡しに差し替えられる想定。
  * 反抗アイコンは掴むと左上の反抗マークが育ち始め、タメ終わりで発動する（途中で離すとキャンセル）。
- * クリア＝バッテリー切れ：画面が真っ黒になり、電池のイラストと
- * 「充電する」だけが出る。充電して起動すると、クリアした盤面が
- * そのまま残っている（2026-11-13 ユーザー設計）。盤面はページ
+ * 終了の演出：バッテリー切れのときだけ、画面が真っ黒になり、
+ * 電池のイラストと「充電する」だけが出る。充電して起動すると
+ * 盤面がそのまま残り、ゲームオーバーの覆いが出る。クリア
+ * （合体数3を作る）のときは黒画面を挟まず、そのままクリア後の
+ * ホーム画面（盤面＋クリアの覆い）につなげる（2026-11-15 変更）。
+ * 盤面はページ
  * （＝コース）ごとに保持され、リセットを押さない限り固定される。
  */
 (function () {
@@ -28,7 +31,7 @@
   const dockEl = document.getElementById('dock-grid');
   const wrapEl = document.querySelector('.board-wrap');
   const batteryFill = document.getElementById('batteryFill');
-  const batteryText = document.getElementById('batteryText');
+  const batteryBolt = document.getElementById('batteryBolt');
   const clockText = document.getElementById('clockText');
   const statusText = document.getElementById('statusText');
   // 時刻は端末の時計にそのまま合わせる（ブラウザの Date は端末のローカル時刻）。
@@ -41,12 +44,14 @@
   setInterval(updateClock, 1000);
   const powerOverlay = document.getElementById('powerOverlay');
   const chargeBtn = document.getElementById('chargeBtn');
+  const powerTitleEl = document.getElementById('powerTitle');
   const powerBatteryFill = document.getElementById('powerBatteryFill');
   const powerPct = document.getElementById('powerPct');
   const losePanel = document.getElementById('losePanel');
   const loseResetBtn = document.getElementById('loseResetBtn');
   const bootLogo = document.getElementById('bootLogo');
   const pageDotsEl = document.getElementById('pageDots');
+  const notchLabelEl = document.getElementById('notchLabel');
 
   const REBEL_MARK = '<svg class="rebel-mark" viewBox="0 0 16 16" aria-hidden="true"><path d="M2 5h3V2m6 0v3h3m0 6h-3v3m-6 0v-3H2"/></svg>';
 
@@ -61,10 +66,12 @@
    * コースごとに「設置の秒数」と「バッテリー%」の組で難易度を調整する
    * （ユーザーの方針：設置秒数を難易度に直結させ、バッテリーも組で変える）。
    * バッテリーは時間制で、減りは全コース共通 1%＝12秒（ユーザーが
-   * チュートリアル基準で決めた「15%を3分で消費」の換算）。
+   * チュートリアル基準で決めた「30%を3分で消費」の換算）。
    * 盤面はページごとに保持され、localStorage に保存される。
    * リセットを押さない限り、充電してもページを移っても盤面は固定。 */
-  const BATTERY_SEC_PER_PERCENT = 12;
+  // バッテリーの換算（2026-11-15 夜、ユーザー指示で変更）：
+  // 100%＝10分、10%＝1分、つまり 1%＝6秒
+  const BATTERY_SEC_PER_PERCENT = 6;
   // チュートリアルの固定盤面（解説しやすい配置。解説の進め方自体は後で決める）:
   // - ヨコ2個が横に隣り合い、そのまま重ねて合体を体験できる (1,0)-(2,0)
   // - タテ2個が縦に隣り合い、同じく合体できる (0,1)-(0,2)
@@ -100,15 +107,31 @@
     // 変更、ユーザー指示）。開始遅延（当初90秒）は「眠りのカウントが
     // 統一されない」というユーザーの指摘で 2026-11-14 に廃止
     // （眠りは設置の秒にだけ進むため、遅延がある間は眠りも止まっていた）
-    { id: 'tutorial', name: 'チュートリアル', battery: 15, installIntervalSec: 5, installDelaySec: 0, fixedBoard: TUTORIAL_BOARD },
-    { id: 'easy', name: '簡単', battery: 30, installIntervalSec: 15, installDelaySec: 0 },
+    { id: 'tutorial', name: 'チュートリアル', battery: 30, installIntervalSec: 5, installDelaySec: 0, fixedBoard: TUTORIAL_BOARD, ready: true },
+    // 2ページ目（2026-11-16 ユーザー仕様）：初期盤面は固定せず
+    // 上4x4をランダム（特殊なし。createGame の初期配置が担う）、
+    // クリア目標は合体数4、バッテリー50%、案内はなし、設置は一旦5秒。
+    // なお簡単以降のコース表の値はだいぶ前の仮置きで、仕様として
+    // あてにしない（2026-11-16 ユーザー指示）。値は都度決める
+    { id: 'easy', name: '簡単', battery: 50, installIntervalSec: 5, installDelaySec: 0, goalCount: 4, ready: true },
+    // 少し難しい・難しいはまだ設定していない（2026-11-16 ユーザー指示）。ready が付いていないステージは勝手に作らず、代わりに空のページを作る
     { id: 'medium', name: '少し難しい', battery: 50, installIntervalSec: 10, installDelaySec: 0 },
     { id: 'hard', name: '難しい', battery: 100, installIntervalSec: 10, installDelaySec: 0 },
+    // チャレンジ（2026-11-16 ユーザー仕様）：チュートリアルを
+    // クリアすると解放される特別なステージ。ステージ選択を開いた
+    // ときだけ、その一番上に出る（押す前の表示には出さない）。
+    // バッテリーは充電しながら100%から変わらず、初期盤面は
+    // ランダム（簡単と同じ作り）。クリアはなく、盤面が一杯に
+    // なったら終わり。設置は一旦5秒ごと。進行の連なり（次の
+    // ステージを出す仕組み）には入れない
+    { id: 'challenge', name: 'チャレンジ', battery: 100, installIntervalSec: 5, installDelaySec: 0, endless: true },
   ];
   const PAGES_KEY = 'homeMerge.pages.v1';
-  // ページは最初はチュートリアルの1枚だけ。クリアすると次のページが
-  // 1枚だけ作られる（2026-11-13 ユーザー指示）。作られたページは
-  // 空っぽで、中身（どのコースになるか）は後で決める
+  // ページは最大2枚（2026-11-16 ユーザー仕様）：1ページ目が土台で、
+  // 2ページ目は挑戦中の次のステージ。2ページ目をクリアすると
+  // 1ページ目に統合され（1ページ目がそのステージのクリア盤面を
+  // 映す）、2ページ目は消える（新しい2ページ目は作らない）。
+  // 空っぽのページ（blank）は旧保存の移行用にだけ残す
   const BLANK_COURSE_ID = 'blank';
   function courseOf(page) {
     return COURSES.find(c => c.id === page.courseId) || null;
@@ -125,9 +148,10 @@
     return {
       batteryStart: course.battery,
       batteryPerMove: 0, // バッテリーは時間制（tickBattery が担う）
-      batterySecPerPercent: BATTERY_SEC_PER_PERCENT,
+      batterySecPerPercent: course.endless ? 0 : BATTERY_SEC_PER_PERCENT, // チャレンジは充電しながら100%から変わらない
       installIntervalSec: 0, // 設置はアプリ側の時計がコース間隔で担う
       installEvery: 999999, // 旧方式の移動連動インストールを止める
+      winCount: course.endless ? 999 : (course.goalCount || 3), // クリアになる合体数（簡単は4。チャレンジは到達しない数にしてクリアなし）
       sleepSecPerZ: 3, // 眠りの個別タイマー：z 1段ぶんの秒数（コース別に調整できる。当初5秒、2026-11-15にユーザーが3秒へ変更）
     };
   }
@@ -159,12 +183,17 @@
       icons: s.icons.map(i => ({
         id: i.id, type: i.type, count: i.count, x: i.x, y: i.y, z: i.z,
         mood: i.mood, voided: i.voided, orient: i.orient, spun: i.spun,
-        sleepProgress: i.sleepProgress || 0,
+        sleepProgress: i.sleepProgress || 0, sleepMs: i.sleepMs || 0,
       })),
     };
   }
   function revivePage(data) {
     if (!data || !Array.isArray(data.icons)) return null;
+    // 眠りの進みはミリ秒単位（sleepMs）が現行。旧保存には秒単位の
+    // sleepProgress しかないので、1000倍して読み替える
+    for (const i of data.icons) {
+      if (typeof i.sleepMs !== 'number') i.sleepMs = (i.sleepProgress || 0) * 1000;
+    }
     if (data.courseId === BLANK_COURSE_ID) {
       const s = E.createCustomGame(data.icons, {
         config: courseConfig(COURSES[0]),
@@ -176,7 +205,7 @@
       return {
         courseId: BLANK_COURSE_ID, state: s,
         elapsedSec: data.elapsedSec || 0, clockMs: 0,
-        charged: !!data.charged, loseClosed: !!data.loseClosed,
+        charged: !!data.charged || s.status === 'won', loseClosed: !!data.loseClosed,
       };
     }
     const course = COURSES.find(c => c.id === data.courseId);
@@ -209,13 +238,14 @@
     return {
       courseId: course.id, state: s,
       elapsedSec: data.elapsedSec || 0, clockMs: 0,
-      charged: !!data.charged, loseClosed: !!data.loseClosed,
+      charged: !!data.charged || s.status === 'won', loseClosed: !!data.loseClosed,
       tut,
     };
   }
   let pages = [];
   let unlockedCount = 1;
   let pageIndex = 0;
+  let clearedStages = []; // クリアしたことのあるステージ（コースid）
   let wipingAll = false; // 初期化の最中は保存しない（beforeunload の保存で消したデータが復活しないように）
   function savePages(immediate) {
     if (wipingAll) return;
@@ -224,12 +254,49 @@
     savePages.last = now;
     try {
       localStorage.setItem(PAGES_KEY, JSON.stringify({
-        version: 1, unlockedCount, pageIndex,
+        version: 1, unlockedCount, pageIndex, clearedStages,
         pages: pages.map(serializePage),
       }));
     } catch (_) { /* 保存できない環境ではそのまま遊べる */ }
   }
   savePages.last = 0;
+  function nextCourse(id) {
+    const i = COURSES.findIndex(c => c.id === id);
+    return i >= 0 ? (COURSES[i + 1] || null) : null;
+  }
+  // 次のステージのページ：設定済み（ready）のステージだけ実ページ
+  // を作り、まだ設定していないステージは勝手に作らず空のページに
+  // する（2026-11-16 ユーザー指示）。次の枠自体が無ければ null
+  function nextPageAfter(courseId) {
+    const next = nextCourse(courseId);
+    if (!next) return null;
+    return next.ready ? freshPage(next) : blankPage();
+  }
+  // 読み込んだページを今の方式（最大2枚）にそろえる。空っぽの
+  // 挑戦ページは次のステージの実ページにし、クリア済みの挑戦
+  // ページは1ページ目へ統合して次のステージを出す。統合したら
+  // true を返す（表示は1ページ目に寄せる）
+  function normalizePages() {
+    let integrated = false;
+    if (pages[1] && pages[1].courseId === BLANK_COURSE_ID) {
+      const next = nextCourse(pages[0].courseId);
+      if (next && next.ready) pages[1] = freshPage(next);
+    }
+    if (pages[1] && pages[1].courseId !== BLANK_COURSE_ID && pages[1].state.status === 'won') {
+      const clearedPage = pages[1];
+      pages = [clearedPage];
+      if (!clearedStages.includes(clearedPage.courseId)) clearedStages.push(clearedPage.courseId);
+      integrated = true;
+    }
+    if (pages.length > 2) pages = pages.slice(0, 2);
+    // 1枚だけでクリア済みの保存（統合の結果ではない）には、挑戦
+    // ページが無いので次のステージを出す。統合した直後は出さない
+    if (!integrated && pages.length === 1 && pages[0].state.status === 'won') {
+      const np = nextPageAfter(pages[0].courseId);
+      if (np) pages.push(np);
+    }
+    return integrated;
+  }
   function loadPages() {
     let raw = null;
     try { raw = localStorage.getItem(PAGES_KEY); } catch (_) { /* noop */ }
@@ -243,8 +310,33 @@
           // まだ作られていない、という形にそろえる）
           const keep = Math.min(revived.length, Math.max(1, data.unlockedCount || revived.length));
           pages = revived.slice(0, keep);
+          // クリアしたことのあるステージ：新しい保存には
+          // clearedStages が入っている。無い旧保存からは、クリア
+          // 済みのページと「次のページがある＝手前のステージは
+          // クリア済み」という形から復元する
+          const validIds = new Set(COURSES.map(c => c.id));
+          if (Array.isArray(data.clearedStages)) {
+            clearedStages = data.clearedStages.filter(id => validIds.has(id));
+          } else {
+            const derived = new Set();
+            for (const p of pages) if (p.state.status === 'won' && validIds.has(p.courseId)) derived.add(p.courseId);
+            if (pages.length >= 2 && validIds.has(pages[0].courseId)) derived.add(pages[0].courseId);
+            clearedStages = COURSES.map(c => c.id).filter(id => derived.has(id));
+          }
+          // 未設定のステージはクリア済み一覧から除き、挑戦ページに
+          // 残っていたら空のページに戻す（少し難しい等を勝手に作って
+          // いた頃の名残を消す。2026-11-16 ユーザー指示）
+          clearedStages = clearedStages.filter(id => {
+            const c = COURSES.find(x => x.id === id);
+            return !!c && !!c.ready;
+          });
+          if (pages[1] && pages[1].courseId !== BLANK_COURSE_ID) {
+            const c1 = courseOf(pages[1]);
+            if (!c1 || !c1.ready) pages[1] = blankPage();
+          }
+          const integrated = normalizePages();
           unlockedCount = pages.length;
-          pageIndex = Math.min(Math.max(0, data.pageIndex || 0), pages.length - 1);
+          pageIndex = integrated ? 0 : Math.min(Math.max(0, data.pageIndex || 0), pages.length - 1);
           return;
         }
       } catch (_) { /* 壊れた保存は作り直す */ }
@@ -308,6 +400,19 @@
   // 締めとして扱い、時間を止めてバッテリーを注目させる
   function tutGoalActive() {
     return !!tutGoalUntil && Date.now() < tutGoalUntil;
+  }
+  // 流れの最後の案内（⑧）が出ている間。⑦に続いて出て、
+  // ノッチのクリア条件を注目させる
+  function tutGoal2Active() {
+    return !!tutGoal2Until && Date.now() >= tutGoalUntil && Date.now() < tutGoal2Until;
+  }
+  // ⑦⑧どちらかの間は、締めとして時間を止める
+  function tutAnyGoalActive() {
+    return tutGoalActive() || tutGoal2Active();
+  }
+  function startTutGoal() {
+    tutGoalUntil = Date.now() + TUT_GOAL_MS;
+    tutGoal2Until = tutGoalUntil + TUT_GOAL_MS;
   }
   function tutRange(page) {
     const t = tutOf(page);
@@ -443,7 +548,7 @@
         // 眠るアイコンは後続の誘導の手と配置的に無関係だった）
         const movedIcon = s.icons.find(
           i => i.x === targetPos.x && i.y === targetPos.y);
-        if (movedIcon) { movedIcon.z = 1; movedIcon.sleepProgress = 0; }
+        if (movedIcon) { movedIcon.z = 1; movedIcon.sleepProgress = 0; movedIcon.sleepMs = 0; }
         t.step = 'sleep';
         t.at = Date.now();
       }
@@ -472,7 +577,7 @@
           t.at = Date.now();
         } else {
           t.step = 'done';
-          tutGoalUntil = Date.now() + TUT_GOAL_MS;
+          startTutGoal();
         }
       }
     } else if (t.step === 'pair') {
@@ -480,7 +585,7 @@
       // 動かしたら（その2つを重ねても、別の手でも）流れは終わる
       t.pair = null;
       t.step = 'done';
-      tutGoalUntil = Date.now() + TUT_GOAL_MS;
+      startTutGoal();
     }
     savePages(true);
   }
@@ -503,19 +608,28 @@
   // 直後だけ、目標の一言（⑦）を少しの間出す
   // 長い文は意味の切れ目で2行に分ける（改行は pre-line で効く）
   const TUT_CAPTIONS = {
-    swap1: '①まずは、\nドラッグで並び替えてみよう',
+    swap1: '①まずはドラッグで\n並び替えてみよう',
     sleep: '②眠ると動かせない\nしばらくすると目覚める',
-    merge1: '③次に、同じ種類を重ねよう',
+    merge1: '③次に同じ種類を重ねよう',
     move2Badge: '④2マス動けるようになった',
     move2Range: '⑤移動してみよう',
-    pair: '⑥合体して移動したおかげで\n方向が揃った',
-    goal: '⑦盤面が埋まったらゲームオーバー、\n埋まる前に電池が切れればクリア',
+    pair: '⑥合体して移動したことで\n方向が揃った',
+    goal: '⑦バッテリーが切れるか\n画面が一杯になったらゲームオーバー',
+    goal2: '⑧合体数3を作ったらクリア',
   };
   const TUT_GOAL_MS = 4000;
+  // 「合体数3」の文字の代わりに置く、汎用アイコンの小さいタイル
+  // （2026-11-15 夜、ユーザー指示）：灰色・矢印なし・目は真ん中。
+  // 数のバッジは本物と同じ青（数3の色）で「3」を付ける。
+  // ノッチの常駐ラベル（index.html 側に同じ形を直書き）と共用
+  function miniGenericHTML() {
+    return '<span class="mini-generic"><span class="mini-eyes"><i></i><i></i></span><span class="mini-badge"><span class="mini-badge-num">3</span></span></span>';
+  }
   let tutCaptionEl = null;
   let tutCaptionKey = '';
   let tutCaptionTimer = null;
   let tutGoalUntil = 0;
+  let tutGoal2Until = 0;
   const TUT_BADGE_MS = 2000;
   // 三手目の「数だけ見せる」段階かどうか
   function tutMove2BadgePhase(page) {
@@ -575,7 +689,7 @@
           // 最後の表示は示すだけ：何もしなくても流れは終わる
           tt.pair = null;
           tt.step = 'done';
-          tutGoalUntil = Date.now() + TUT_GOAL_MS;
+          startTutGoal();
           savePages(true);
         }
         syncTutUI();
@@ -603,7 +717,8 @@
           ? (tutMove2BadgePhase(page) ? TUT_CAPTIONS.move2Badge : TUT_CAPTIONS.move2Range)
           : (TUT_CAPTIONS[t.step] || '');
       }
-      else if (tutGoalUntil && Date.now() < tutGoalUntil) text = TUT_CAPTIONS.goal;
+      else if (tutGoalActive()) text = TUT_CAPTIONS.goal;
+      else if (tutGoal2Active()) text = TUT_CAPTIONS.goal2;
     }
     if (text !== tutCaptionKey) {
       tutCaptionKey = text;
@@ -617,7 +732,12 @@
           const W = br.x + br.width - tl.x;
           tutCaptionEl = document.createElement('div');
           tutCaptionEl.id = 'tutCaption';
-          tutCaptionEl.textContent = text;
+          if (text === TUT_CAPTIONS.goal2) {
+            // ⑧だけは「合体数3」を文字でなく汎用アイコンで見せる
+            tutCaptionEl.innerHTML = `⑧${miniGenericHTML()}を作ったらクリア`;
+          } else {
+            tutCaptionEl.textContent = text;
+          }
           tutCaptionEl.style.left = `${tl.x}px`;
           tutCaptionEl.style.width = `${W}px`;
           tutCaptionEl.style.top = `${r4.y + 6}px`;
@@ -625,13 +745,15 @@
         }
       }
     }
-    // 目標の一言は、期限が来たら消す
-    if (text === TUT_CAPTIONS.goal && !tutCaptionTimer) {
+    // 目標の一言は、期限が来たら次へ進める（⑦→⑧→消える）
+    const goalEnd = text === TUT_CAPTIONS.goal ? tutGoalUntil
+      : text === TUT_CAPTIONS.goal2 ? tutGoal2Until : 0;
+    if (goalEnd && !tutCaptionTimer) {
       tutCaptionTimer = setTimeout(() => {
         tutCaptionTimer = null;
-        tutGoalUntil = 0;
+        if (!tutGoal2Active()) { tutGoalUntil = 0; tutGoal2Until = 0; }
         syncTutUI();
-      }, Math.max(0, tutGoalUntil - Date.now()) + 30);
+      }, Math.max(0, goalEnd - Date.now()) + 30);
     }
   }
   // 範囲外を暗くする（2026-11-15 ユーザー指示で、穴あきの覆い
@@ -646,14 +768,17 @@
   // render のたびに呼ばれる
   function syncTutDim(page, bright) {
     const goal = tutGoalActive();
-    const show = (!!bright || goal) && !anySheetOpen();
+    const goal2 = tutGoal2Active();
+    const show = (!!bright || goal || goal2) && !anySheetOpen();
     tutShadeEl.hidden = !show;
     // 流れの間は盤面とドックの区分を暗がりの上に出す。最後の
-    // ⑦では区分ごと暗がりの下にして（盤面もドックも暗くなる）、
-    // 電池と案内文だけを上に残す
-    phoneEl.classList.toggle('tut-shading', show && !goal);
+    // ⑦⑧では区分ごと暗がりの下にして（盤面もドックも暗くなる）、
+    // ⑦では電池と案内文だけを、⑧ではノッチのクリア条件と
+    // 案内文だけを上に残す
+    phoneEl.classList.toggle('tut-shading', show && !goal && !goal2);
     phoneEl.classList.toggle('tut-goal', show && goal);
-    boardEl.classList.toggle('tut-dimming', show && !goal);
+    phoneEl.classList.toggle('tut-goal2', show && goal2);
+    boardEl.classList.toggle('tut-dimming', show && !goal && !goal2);
     // 数だけ見せる間は、重ねたアイコンに印を付ける（タイルの
     // 暗がりをバッジより下にして、バッジだけを残すため）
     const t = tutOf(page);
@@ -710,6 +835,7 @@
   const spinShownOrient = new Map(); // スピンの表示済みの向き（回転の動きの判定用）
   let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent }
   let press = null; // タップ判定用: { pointerId, cell, handled }
+  let pageSwipe = null; // ページ移動スワイプの候補: { pointerId, startX, startY }
   let tapSel = null; // タップ操作で選択中のアイコンID
   let warpDrag = null; // やる気ワープの行き先選びドラッグ { iconId, pointerId, startX, startY, active, ghost, hoverKey }
   let pendingAct = null; // 発動のタメ中 { iconId, kind: 'rebel'|'warp', pointerId, timer }
@@ -736,10 +862,6 @@
     if (icon.z > 0) return 'sleep';
     return icon.mood; // 'normal' | 'eager' | 'rebel'
   }
-  function moodLabel(icon) {
-    return MOODS[moodOf(icon)];
-  }
-
   // アイコンの絵は、ごきげんサバイバルの iconArtwork（通常種・非ワープ）をコードのまま使う。
   // 顔は「矢印＋両目（反抗時は反抗の目）＋反抗マーク」で、口は存在しない。
   // ただしサヨク・ウヨクだけは片目デザイン（2026-11-10 ユーザー指定、手描きスケッチ準拠）：
@@ -907,10 +1029,15 @@
   function updateBatteryDisplay() {
     // クリア後に充電が済んだページでは、バッテリーは満タン表示にする
     // （盤面そのものはクリアした瞬間のまま固定されている）
-    const shownBattery = state.status === 'won' && currentPage().charged ? 100 : state.battery;
+    const page = currentPage();
+    const shownBattery = state.status !== 'playing' && page.charged ? 100 : state.battery;
     batteryFill.style.width = shownBattery + '%';
     batteryFill.classList.toggle('low', shownBattery <= 20);
-    batteryText.textContent = shownBattery + '%';
+    // ラン中でないときは充電中として⚡を出し続ける（2026-11-15
+    // 夜、ユーザー指示）：終わったページと、時間の関係ない
+    // 空っぽページが対象。プレイ中のページでは出さない
+    const curCourse = courseOf(page);
+    batteryBolt.toggleAttribute('hidden', !(page.courseId === BLANK_COURSE_ID || state.status !== 'playing' || !!(curCourse && curCourse.endless)));
   }
   // 盤面の描画は「毎回作り直し」ではなく「差分更新」（2026-11-13
   // ユーザー指摘で置き換え）：マスとドックは最初に一度だけ作り、
@@ -991,7 +1118,6 @@
     if (trophyBtnEl) trophyBtnEl.classList.toggle('has-unseen', achData.unseen > 0);
 
     const seen = new Set();
-    const titled = new Set();
     for (const icon of icons) {
       if (icon.id === hideId) continue;
       const cell = cellEls.get(icon.x + ',' + icon.y);
@@ -1009,10 +1135,9 @@
       }
       if (rec.stack.parentNode !== cell) cell.appendChild(rec.stack);
       rec.stack.classList.toggle('selected', tapSel === icon.id);
-      cell.title = icon.count > 1
-        ? `${E.TYPES[icon.type].name}（合体数${icon.count}） ${moodLabel(icon)}`
-        : `${E.TYPES[icon.type].name} ${moodLabel(icon)}`;
-      titled.add(cell);
+      // やる気で変えられた直後のアイコンには目印の光を付ける
+      rec.stack.classList.toggle('converted-flash',
+        (convertFlashUntil.get(icon.id) || 0) > Date.now());
     }
     // 消えたアイコン（合体で取り込まれた等）は要素ごと外す。
     // ドラッグで隠れているアイコンは、戻ってきたときに使い回せる
@@ -1023,9 +1148,6 @@
         if (id !== hideId) iconNodes.delete(id);
       }
     }
-    for (const cell of cellEls.values()) {
-      if (!titled.has(cell) && cell.title) cell.title = '';
-    }
     maybeShowPower();
     maybeShowEnd();
     savePages();
@@ -1033,13 +1155,18 @@
     markMoodTarget();
   }
 
-  // クリア＝バッテリー切れの演出（2026-11-13 ユーザー設計）：
+  // バッテリー切れの演出（2026-11-13 ユーザー設計）：
   // 画面がフェードして真っ黒になり、電池のイラストと「充電する」だけが
   // 出る。「再起動」で盤面を差し替えることはしない。充電して起動すると
-  // クリアした盤面がそのまま見られる
+  // 盤面がそのまま見られ、ゲームオーバーの覆いが出る。
+  // クリア（合体数3）のときはこの演出は使わず、そのままクリア後の
+  // ホーム画面（盤面＋クリアの覆い）につなげる（2026-11-15 ユーザー指示）
+  function powerDead(page) {
+    return state.status === 'lost' && state.battery <= 0 && !page.charged;
+  }
   function maybeShowPower() {
     const page = currentPage();
-    const dead = state.status === 'won' && !page.charged;
+    const dead = powerDead(page);
     if (!dead) {
       if (!charging) {
         powerOverlay.classList.remove('on', 'show-btn');
@@ -1048,6 +1175,7 @@
       return;
     }
     if (!powerOverlay.hidden) return;
+    powerTitleEl.hidden = true;
     powerOverlay.hidden = false;
     powerOverlay.classList.remove('charging', 'booting');
     bootLogo.hidden = true;
@@ -1061,12 +1189,12 @@
       powerOverlay.classList.add('on');
     }));
     setTimeout(() => {
-      if (state.status === 'won' && !currentPage().charged) powerOverlay.classList.add('show-btn');
+      if (powerDead(currentPage())) powerOverlay.classList.add('show-btn');
     }, 1200);
   }
 
   chargeBtn.addEventListener('click', () => {
-    if (charging || state.status !== 'won') return;
+    if (charging || !powerDead(currentPage())) return;
     charging = true;
     chargeBtn.disabled = true;
     powerOverlay.classList.add('charging');
@@ -1109,17 +1237,90 @@
   // クリア済みは充電が済んでから（充電前は黒画面が出ている）
   const loseTitleEl = losePanel.querySelector('.lose-title');
   const loseTextEl = losePanel.querySelector('.lose-text');
+  const stageSelectEl = document.getElementById('stageSelect');
+  // 1ページ目の終了画面では、結果表記の上に、クリアしたことの
+  // あるステージを選べる欄を出す（2026-11-16 ユーザー仕様）
+  // ステージ選択の見た目（2026-11-16 ユーザー指示）：普段は今の
+  // ステージ名と∨（下向きの不等号のような印）だけを出し、∨を
+  // 押すと選択肢が追加の枠で開く
+  let stageMenuOpen = false;
+  let stageSelectSig = '';
+  function renderStageSelect() {
+    if (!stageSelectEl) return;
+    // チャレンジはチュートリアルをクリアすると解放され、開いた
+    // 枠の中でだけ一番上に出る（2026-11-16 ユーザー指示）
+    const ids = [];
+    if (clearedStages.includes('tutorial')) ids.push('challenge');
+    for (const c of COURSES) {
+      if (c.id !== 'challenge' && clearedStages.includes(c.id)) ids.push(c.id);
+    }
+    const curCourse = courseOf(currentPage());
+    if (pageIndex !== 0 || !ids.length || !curCourse) {
+      stageSelectEl.hidden = true;
+      stageSelectEl.innerHTML = '';
+      stageMenuOpen = false;
+      stageSelectSig = '';
+      return;
+    }
+    // 描き直しは中身が変わったときだけ（毎回の描画で作り直すと、
+    // タップの途中でボタンが入れ替わってクリックが消える）
+    const sig = ids.join(',') + '|' + curCourse.id + '|' + (stageMenuOpen ? 'open' : 'shut');
+    if (sig === stageSelectSig && !stageSelectEl.hidden) return;
+    stageSelectSig = sig;
+    stageSelectEl.innerHTML = '';
+    const label = document.createElement('div');
+    label.className = 'stage-select-label';
+    label.textContent = 'ステージ選択';
+    stageSelectEl.appendChild(label);
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'stage-toggle';
+    toggle.setAttribute('aria-label', 'ステージを選ぶ');
+    const name = document.createElement('span');
+    name.textContent = curCourse.name;
+    toggle.appendChild(name);
+    const chev = document.createElement('span');
+    chev.className = 'stage-chevron' + (stageMenuOpen ? ' open' : '');
+    chev.innerHTML = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><polyline points="2,4 6,8 10,4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    toggle.appendChild(chev);
+    toggle.addEventListener('click', () => {
+      stageMenuOpen = !stageMenuOpen;
+      stageSelectSig = '';
+      renderStageSelect();
+    });
+    stageSelectEl.appendChild(toggle);
+    if (stageMenuOpen) {
+      const menu = document.createElement('div');
+      menu.className = 'stage-menu';
+      for (const id of ids) {
+        const course = COURSES.find(c => c.id === id);
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'stage-menu-item' + (currentPage().courseId === id ? ' current' : '');
+        item.textContent = course.name;
+        item.addEventListener('click', () => { stageMenuOpen = false; selectStage(id); });
+        menu.appendChild(item);
+      }
+      stageSelectEl.appendChild(menu);
+    }
+    stageSelectEl.hidden = false;
+  }
   function maybeShowEnd() {
-    if (state.status === 'lost') {
+    if (state.status === 'lost' && (state.battery > 0 || currentPage().charged)) {
       loseTitleEl.textContent = 'ゲームオーバー';
-      loseTextEl.textContent = 'ホーム画面が一杯になりました。';
+      loseTextEl.textContent = state.battery <= 0
+        ? 'バッテリーが切れました。'
+        : 'ホーム画面が一杯になりました。';
       losePanel.hidden = false;
+      renderStageSelect();
     } else if (state.status === 'won' && currentPage().charged) {
       loseTitleEl.textContent = 'クリア';
       loseTextEl.textContent = 'このページはクリア済みです。';
       losePanel.hidden = false;
+      renderStageSelect();
     } else {
       losePanel.hidden = true;
+      if (stageSelectEl) stageSelectEl.hidden = true;
     }
   }
   loseResetBtn.addEventListener('click', () => resetCurrentPage());
@@ -1127,6 +1328,27 @@
   // ページの表示と切り替え。コース名のテキストは出さない
   // （2026-11-13 ユーザー指示）。ドットは実在するページの分だけ
   // 中央に並べ、ページが1枚だけのときは出さない（実機の写真準拠）
+  // ノッチの常駐ラベルは、今開いているページのクリア目標を出す
+  // （チュートリアルは合体数3、簡単は合体数4。バッジの色は盤面の
+  // 数のバッジと同じ色順）
+  function goalOf(page) {
+    const c = courseOf(page);
+    return (c && c.goalCount) || 3;
+  }
+  function updateNotchLabel() {
+    if (!notchLabelEl) return;
+    const cc = courseOf(currentPage());
+    if (cc && cc.endless) {
+      // チャレンジにはクリア目標がないので、ノッチの目標表示は出さない
+      notchLabelEl.style.display = 'none';
+      notchLabelEl.removeAttribute('aria-label');
+      return;
+    }
+    notchLabelEl.style.display = '';
+    const g = goalOf(currentPage());
+    notchLabelEl.setAttribute('aria-label', `合体数${g}を作ったらクリア`);
+    notchLabelEl.innerHTML = `<span class="mini-generic"><span class="mini-eyes"><i></i><i></i></span><span class="mini-badge col${(g - 2) % 5}"><span class="mini-badge-num">${g}</span></span></span>を作ったらクリア`;
+  }
   function renderPageBar() {
     pageDotsEl.innerHTML = '';
     pageDotsEl.style.display = pages.length <= 1 ? 'none' : '';
@@ -1136,11 +1358,14 @@
       dot.className = 'page-dot' + (i === pageIndex ? ' active' : '');
       const c = courseOf(pages[i]);
       dot.setAttribute('aria-label', (c ? c.name : '空っぽのページ') + 'へ');
-      dot.addEventListener('click', () => switchPage(i));
+      dot.addEventListener('click', () => switchPageAnimated(i));
       pageDotsEl.appendChild(dot);
     }
+    updateNotchLabel();
   }
   function cancelInteractions() {
+    teardownPageSlide();
+    pageSwipe = null;
     if (drag) { removeGhost(); drag = null; }
     if (warpDrag) { removeGhost(); warpDrag = null; }
     cancelPendingAct();
@@ -1157,6 +1382,171 @@
     savePages(true);
     render(state.icons, null);
   }
+
+  // ページ移動のスライド演出（2026-11-15 夜、ユーザーが選んだ
+  // 「軽めの組み合わせ」）：スワイプ中は盤面が指についてきて、
+  // 離した位置が盤面幅の40%を超えたら隣のページへ、超えなければ
+  // 戻る。勢い（速さ）では決めない。止まるまでの動きは最大0.3秒で、
+  // 残りの距離に比例して短くなる。端のページでは、無い側へは盤面は
+  // 動かない（引っ張る演出もなし）。壁紙は動かさない。ドットの
+  // タップでも同じスライドで切り替える
+  const PAGE_SLIDE_MS = 300;
+  const PAGE_SLIDE_RATIO = 0.4;
+  let pageSlide = null;
+  let pageSlideSeq = 0;
+
+  // 終了ページの覆いの文言（maybeShowEnd と同じ決め方）。スライド中は
+  // 本物の覆いを隠し、こちらで作った写しを盤面と一緒に滑らせる
+  function endVeilData(page) {
+    const st = page.state;
+    if (st.status === 'lost' && (st.battery > 0 || page.charged)) {
+      return { title: 'ゲームオーバー', text: st.battery <= 0 ? 'バッテリーが切れました。' : 'ホーム画面が一杯になりました。' };
+    }
+    if (st.status === 'won' && page.charged) {
+      return { title: 'クリア', text: 'このページはクリア済みです。' };
+    }
+    return null;
+  }
+  function buildEndVeil(page) {
+    const d = endVeilData(page);
+    if (!d) return null;
+    const veil = document.createElement('div');
+    veil.className = 'lose-panel page-slide-veil';
+    veil.innerHTML = `<p class="lose-title">${d.title}</p><p class="lose-text">${d.text}</p>`
+      + `<div class="lose-reset" aria-hidden="true">${loseResetBtn.innerHTML}</div>`;
+    return veil;
+  }
+  // 隣のページの盤面の写し（操作は受けない、見た目だけ）
+  function buildBoardClone(page) {
+    const clone = document.createElement('div');
+    clone.className = 'board-clone';
+    const cells = [];
+    for (let y = 0; y < state.rows - 1; y++) {
+      for (let x = 0; x < state.cols; x++) {
+        const cell = document.createElement('div');
+        cell.className = 'cell' + ((x + y) % 2 === 1 ? ' check' : '');
+        clone.appendChild(cell);
+        cells.push(cell);
+      }
+    }
+    for (const icon of page.state.icons) {
+      const cell = cells[icon.y * state.cols + icon.x];
+      if (!cell) continue;
+      const holder = document.createElement('div');
+      holder.innerHTML = iconHTML(icon);
+      const stack = holder.firstElementChild;
+      // 写しは描き直しの対象にしない（本物の盤面と取り違えないため）
+      stack.removeAttribute('data-icon-id');
+      cell.appendChild(stack);
+    }
+    return clone;
+  }
+  // from のページ（本物の盤面）と to までの各ページの写しを横に並べ、
+  // from が見える位置にずらした状態でスライドの入れ物を作る
+  function buildPageSlide(from, to) {
+    const width = boardEl.getBoundingClientRect().width;
+    if (!(width > 0)) return null;
+    const lo = Math.min(from, to), hi = Math.max(from, to);
+    const anchor = boardEl.nextSibling;
+    const viewport = document.createElement('div');
+    viewport.className = 'page-slide-viewport';
+    const track = document.createElement('div');
+    track.className = 'page-slide-track';
+    track.style.width = `${width * (hi - lo + 1)}px`;
+    for (let i = lo; i <= hi; i++) {
+      const slot = document.createElement('div');
+      slot.className = 'page-slide-slot';
+      slot.style.width = `${width}px`;
+      slot.appendChild(i === from ? boardEl : buildBoardClone(pages[i]));
+      const veil = buildEndVeil(pages[i]);
+      if (veil) slot.appendChild(veil);
+      track.appendChild(slot);
+    }
+    viewport.appendChild(track);
+    wrapEl.insertBefore(viewport, anchor);
+    let panelHidden = false;
+    if (!losePanel.hidden) { losePanel.style.visibility = 'hidden'; panelHidden = true; }
+    const base = -(from - lo) * width;
+    track.style.transform = `translateX(${base}px)`;
+    pageSlide = {
+      id: ++pageSlideSeq, from, to, lo, width, base, offset: base,
+      viewport, track, panelHidden, pointerId: null, settling: false, timer: 0,
+    };
+    return pageSlide;
+  }
+  function teardownPageSlide() {
+    if (!pageSlide) return;
+    const s = pageSlide;
+    pageSlide = null;
+    clearTimeout(s.timer);
+    // 盤面を元の場所へ戻してから、スライド用の入れ物を捨てる
+    wrapEl.insertBefore(boardEl, s.viewport);
+    if (s.panelHidden) losePanel.style.visibility = '';
+    s.viewport.remove();
+  }
+  function followPageSlide(dx) {
+    const s = pageSlide;
+    if (!s || s.settling) return;
+    const target = -(s.to - s.lo) * s.width;
+    const min = Math.min(s.base, target), max = Math.max(s.base, target);
+    s.offset = Math.max(min, Math.min(max, s.base + dx));
+    s.track.style.transform = `translateX(${s.offset}px)`;
+  }
+  function finishPageSlide(commit) {
+    const s = pageSlide;
+    if (!s || s.settling) return;
+    s.settling = true;
+    const target = commit ? -(s.to - s.lo) * s.width : s.base;
+    const remaining = Math.abs(target - s.offset);
+    const dur = Math.round(PAGE_SLIDE_MS * remaining / s.width);
+    void s.track.offsetWidth; // 開始位置を確定させてから動きを付ける
+    s.track.style.transition = `transform ${dur}ms ease-out`;
+    s.offset = target;
+    s.track.style.transform = `translateX(${target}px)`;
+    const id = s.id;
+    s.timer = setTimeout(() => {
+      if (!pageSlide || pageSlide.id !== id) return;
+      const to = s.to;
+      teardownPageSlide();
+      if (commit) switchPage(to);
+    }, dur + 60);
+  }
+  function engagePageSlide(dir, pointerId) {
+    const to = pageIndex + dir;
+    if (to < 0 || to >= pages.length) return false;
+    if (!buildPageSlide(pageIndex, to)) return false;
+    pageSlide.pointerId = pointerId;
+    return true;
+  }
+  // ドットのタップはこちら（同じスライドで切り替える）
+  function switchPageAnimated(i) {
+    if (pageSlide) return;
+    if (i === pageIndex || i < 0 || i >= pages.length) return;
+    cancelInteractions();
+    if (!buildPageSlide(pageIndex, i)) { switchPage(i); return; }
+    finishPageSlide(true);
+  }
+  // スワイプ中の指の動き：横が縦に勝ち10pxを超えたら指についてくる
+  // 動きを始める。隣のページが無い側へは始めない（端では動かない）
+  function pageSwipeMove(e) {
+    const sdx = e.clientX - pageSwipe.startX;
+    const sdy = e.clientY - pageSwipe.startY;
+    if (!pageSlide) {
+      if (Math.abs(sdx) >= 10 && Math.abs(sdx) > Math.abs(sdy)) {
+        if (engagePageSlide(sdx < 0 ? 1 : -1, e.pointerId)) press = null;
+      }
+      if (!pageSlide) return;
+    }
+    if (pageSlide.pointerId !== e.pointerId || pageSlide.settling) return;
+    if (Math.abs(sdy) > Math.abs(sdx)) {
+      // 縦の動きが勝ったら、スライドはやめて元のページへ戻す
+      pageSwipe = null;
+      press = null;
+      finishPageSlide(false);
+      return;
+    }
+    followPageSlide(sdx);
+  }
   // そのページを最初の状態からやり直す（チュートリアルは固定盤面に
   // 戻る。空っぽのページは空っぽに戻る）
   function resetCurrentPage() {
@@ -1169,16 +1559,45 @@
     savePages(true);
     render(state.icons, null);
   }
-  // クリアしたら次のページを1枚だけ作る（2026-11-13 ユーザー指示）。
-  // 作られるページは空っぽで、中身は後で決める。コースの数まで
-  // 作り終えたら、それ以上は増えない
-  function unlockNextPage() {
-    if (pageIndex === pages.length - 1 && pages.length < COURSES.length) {
-      pages.push(blankPage());
-      unlockedCount = pages.length;
-      renderPageBar();
-      savePages(true);
+  // ステージをクリアしたときの処理（2026-11-16 ユーザー仕様）：
+  // クリアしたステージは「クリアしたことのあるステージ」に加わる。
+  // 1ページ目でクリアしたら、挑戦ページが無ければ次のステージを
+  // 2ページ目に出す。2ページ目（挑戦ページ）でクリアしたら、その
+  // ページを1ページ目に統合し（1ページ目がそのステージのクリア
+  // 盤面を映す）、2ページ目は消える。統合と同時に新しい2ページ目
+  // は作らない（2026-11-16 ユーザー指摘：それは統合の誤解だった）
+  function onStageCleared(page) {
+    const idx = pages.indexOf(page);
+    if (idx < 0) return;
+    const course = courseOf(page);
+    if (course && !clearedStages.includes(course.id)) clearedStages.push(course.id);
+    if (idx === 0) {
+      if (pages.length === 1 && course) {
+        const np = nextPageAfter(course.id);
+        if (np) pages.push(np);
+      }
+    } else if (course) {
+      pages = [page];
+      pageIndex = 0;
+      state = pages[0].state;
     }
+    unlockedCount = pages.length;
+    renderPageBar();
+    savePages(true);
+  }
+  // 終了画面のステージ選択で選んだステージを、1ページ目で新しく
+  // 始める（2026-11-16 ユーザー仕様）
+  function selectStage(courseId) {
+    const course = COURSES.find(c => c.id === courseId);
+    if (!course || pageIndex !== 0) return;
+    stageMenuOpen = false;
+    cancelInteractions();
+    pages[0] = freshPage(course);
+    state = pages[0].state;
+    achNewRun();
+    renderPageBar();
+    savePages(true);
+    render(state.icons, null);
   }
 
   // 位置が変わったアイコンが滑って移動して見えるように描き直す（FLIP）
@@ -1422,12 +1841,14 @@
   // 掴み続けて演出が終わると発動し、
   // 途中で離すとキャンセルされる（タップ＝押してすぐ離す、では
   // 発動しなくなった）
-  const REBEL_RAMPAGE_MS = 1000;
+  // 反抗のタメは仮に 0.5 秒（2026-11-15 夜、ユーザー指示で
+  // ごまが仮決め。実プレイで調整する）。ワープは 1 秒のまま
+  const REBEL_RAMPAGE_MS = 500;
   const WARP_CHARGE_MS = 1000; // CSS の warp-charge の長さと合わせる
-  function startPendingAct(icon, kind, pointerId) {
+  function startPendingAct(icon, kind, pointerId, startX, startY) {
     const stack = wrapEl.querySelector(`.icon-stack[data-icon-id="${icon.id}"]`);
     if (stack) stack.classList.add(kind === 'rebel' ? 'rampaging' : 'charging');
-    pendingAct = { iconId: icon.id, kind, pointerId, timer: null };
+    pendingAct = { iconId: icon.id, kind, pointerId, timer: null, startX, startY };
     try { wrapEl.setPointerCapture(pointerId); } catch (_) { /* noop */ }
     pendingAct.timer = setTimeout(firePendingAct, kind === 'rebel' ? REBEL_RAMPAGE_MS : WARP_CHARGE_MS);
   }
@@ -1444,6 +1865,7 @@
   }
   function firePendingAct() {
     if (!pendingAct) return;
+    pageSwipe = null;
     const { iconId, kind } = pendingAct;
     pendingAct = null;
     clearPendingActVisual();
@@ -1457,130 +1879,42 @@
     flipRender(state.icons, null); // 通常の移動と同じく、滑って移動して見えるようにする
   }
 
-  // ページのスワイプ切り替え（2026-11-13 ユーザー指示）：空きマスから
-  // 横にスワイプするとページがめくれる（左で次へ、右で前へ）。
-  // アイコンのマスから始めた場合は通常のドラッグになるので対象外。
-  // 終了したページ（覆いが出ている）からもスワイプで離れられるよう、
-  // ゲーム側の押下とは独立に追跡する
-  let pageSwipe = null;
-  wrapEl.addEventListener('pointerdown', (e) => {
-    if (!e.isPrimary) return;
-    if (e.pointerType === 'mouse' && e.button !== 0) return;
-    if (pages.length <= 1 || drag || warpDrag || pendingAct || pageSwipe) return;
-    // ドックのアプリ（ボタン）の上から始まる押下はスワイプにしない。
-    // ここでポインターを掴むと、離したときのクリックがボタンに
-    // 届かなくなり、アプリが開かなくなるため
-    if (e.target.closest && e.target.closest('button')) return;
-    // 終了ページのグレー覆いの上では、下にアイコンがあるかどうかは
-    // 関係なく、覆いの範囲（＝盤面）全体をスワイプの対象にする
-    // （2026-11-13 ユーザー指示）。覆いがイベントを受ける側になる
-    // ためマスは特定できないので、盤面の矩形に入っているかで見る
-    const endShown = state.status === 'lost'
-      || (state.status === 'won' && currentPage().charged);
-    if (endShown) {
-      const r = boardEl.getBoundingClientRect();
-      if (e.clientX >= r.left && e.clientX < r.right
-        && e.clientY >= r.top && e.clientY < r.bottom) {
-        // 覆いの上から始めたスワイプは、ポインターキャプチャを
-        // 使わない（noCapture：覆いを起点にキャプチャすると、次の
-        // 操作が pointercancel になってしまうことを実測で確認）。
-        // ページ切り替えも離した瞬間に遅らせる（deferSwitch）
-        pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false, deferSwitch: true, pendingDir: 0, noCapture: true };
-      }
-      return;
-    }
-    const pos = cellFromPoint(e.clientX, e.clientY);
-    if (!pos) return;
-    if (pos.y >= state.rows - 1) return; // ドックの段は対象外
-    if (E.iconAt(state, pos.x, pos.y)) {
-      // アイコンの上から始まる押下は通常のスワイプにはしないが、
-      // フリック（速い横の振り）の候補として動きだけ記録しておき、
-      // 離した瞬間に判定する（2026-11-14夜 ユーザー選択の案1：
-      // スマホ準拠。ゆっくり動かせばアイコンのドラッグ、速い横
-      // フリックならページ移動にする）
-      pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false, flickWatch: true, dead: false, samples: [{ x: e.clientX, y: e.clientY, t: performance.now() }] };
-      return;
-    }
-    // ドックのアイコンは盤面のアイコンと同じ括りにする（2026-11-13
-    // ユーザー指示で chat1 が追加）：アプリのタイルからは始めない
-    if (e.target.closest && e.target.closest('.app-icon')) return;
-    pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, switched: false, captured: false };
-  });
-  const onSwipeMove = (e) => {
-    if (!pageSwipe || e.pointerId !== pageSwipe.pointerId || pageSwipe.switched) return;
-    if (pageSwipe.flickWatch) {
-      // フリック候補は動きを記録するだけ（判定は離した瞬間）。
-      // 途中でタメや行き先ドラッグに化けた候補は外す
-      if (warpDrag || pendingAct) pageSwipe.dead = true;
-      pageSwipe.samples.push({ x: e.clientX, y: e.clientY, t: performance.now() });
-      if (pageSwipe.samples.length > 12) pageSwipe.samples.shift();
-      return;
-    }
-    const dx = e.clientX - pageSwipe.startX;
-    const dy = e.clientY - pageSwipe.startY;
-    // ある程度ドラッグしてからポインターを掴む（タップのクリックを
-    // 邪魔しないため）。掴んでおくと、盤面の端から外へはみ出す
-    // スワイプでも move を拾い続けられる
-    if (!pageSwipe.captured && !pageSwipe.noCapture && Math.abs(dx) >= 16) {
-      pageSwipe.captured = true;
-      try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
-    }
-    if (Math.abs(dx) >= 56 && Math.abs(dx) > Math.abs(dy) * 1.4) {
-      pageSwipe.switched = true;
-      const dir = dx < 0 ? 1 : -1;
-      if (pageSwipe.deferSwitch) pageSwipe.pendingDir = dir;
-      else switchPage(pageIndex + dir);
-    }
-  };
-  wrapEl.addEventListener('pointermove', onSwipeMove);
-  // キャプチャを使わない追跡（覆いから始めたスワイプ）では、ポインター
-  // が盤面の外へ出ると move が届かなくなるため、window でも拾う
-  window.addEventListener('pointermove', (e) => {
-    if (pageSwipe && !pageSwipe.captured) onSwipeMove(e);
-  });
-  const endPageSwipe = (e) => {
-    if (!pageSwipe || e.pointerId !== pageSwipe.pointerId) return;
-    const done = pageSwipe;
-    pageSwipe = null;
-    if (done.captured) {
-      try { wrapEl.releasePointerCapture(done.pointerId); } catch (_) { /* noop */ }
-    }
-    // フリックの判定（アイコンの上から始めた候補のみ、離した瞬間に
-    // 行う）：横の移動量が盤面幅の3割以上あり、最後の100ミリ秒での
-    // 横の速さが 0.5px/ms 以上で横が縦の1.5倍以上ならページ移動。
-    // switchPage が進行中のドラッグを取り消すので、掴んでいた
-    // アイコンは元の位置に戻る。行き先のページが無い方向では
-    // switchPage が何もせず、通常のドロップがそのまま進む
-    if (done.flickWatch && e.type === 'pointerup' && !done.dead && !warpDrag && !pendingAct) {
-      const samples = done.samples.concat([{ x: e.clientX, y: e.clientY, t: performance.now() }]);
-      const dx = e.clientX - done.startX;
-      const boardW = boardEl.getBoundingClientRect().width;
-      if (Math.abs(dx) >= boardW * 0.3) {
-        const last = samples[samples.length - 1];
-        let first = samples[0];
-        for (const s of samples) { if (last.t - s.t <= 100) { first = s; break; } }
-        const dt = last.t - first.t;
-        if (dt >= 20) {
-          const vx = (last.x - first.x) / dt;
-          const vy = (last.y - first.y) / dt;
-          if (Math.abs(vx) >= 0.5 && Math.abs(vx) >= Math.abs(vy) * 1.5 && Math.sign(vx) === Math.sign(dx)) {
-            switchPage(pageIndex + (dx < 0 ? 1 : -1));
-          }
-        }
-      }
-    }
-    // 覆いから始めたスワイプの切り替えは、離した瞬間に実行する
-    if (e.type === 'pointerup' && done.pendingDir) {
-      switchPage(pageIndex + done.pendingDir);
-    }
-  };
-  wrapEl.addEventListener('pointerup', endPageSwipe);
-  window.addEventListener('pointerup', endPageSwipe);
-  wrapEl.addEventListener('pointercancel', endPageSwipe);
-  window.addEventListener('pointercancel', endPageSwipe);
+  // ページ移動は、ドット（ページ切替ボタン）のタップと、
+  // アイコンを持っていないときの横スワイプ（2026-11-15 ユーザー
+  // 指示で追加）。アイコンを持っているときは絶対にめくらない：
+  // ヨコのアイコンの動きと横スワイプが同じ向きで、速いアイコン
+  // 操作がページ移動に化けてしまうため（同日の先行決定）、
+  // 速さや距離ではなく「アイコンを持っているかどうか」で分ける
 
+  wrapEl.addEventListener('dragstart', (e) => { e.preventDefault(); });
+  // ページ移動スワイプの候補を立てる。アイコンの上に押下しただけ
+  // では「持っている」ことにせず、実際に持ち上げた（ドラッグが
+  // 始まった）時点で候補を取り消す（2026-11-15 ユーザー指示）
+  function armPageSwipe(e) {
+    pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
+    e.preventDefault();
+    try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+  }
   wrapEl.addEventListener('pointerdown', (e) => {
-    if (state.status !== 'playing') return;
+    // スライドの着地中は、新しい盤面操作を始めない
+    if (pageSlide && pageSlide.settling) return;
+    // 終了ページでは、覆いの上から始まった横スワイプでもページを
+    // めくれる（アイコンを持っていないときだけ。ボタン類（リセット
+    // ・ステージ選択）の上から始まった押下は除く：ポインターを
+    // 捕捉するとボタンのクリックが届かなくなるため）
+    if (state.status !== 'playing') {
+      if (!losePanel.hidden && e.isPrimary
+        && !(e.pointerType === 'mouse' && e.button !== 0)
+        && losePanel.contains(e.target)
+        && !e.target.closest('#loseResetBtn, #stageSelect')) {
+        pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
+        e.preventDefault();
+        // 盤面の描き直しで押したマスの要素が消えると操作が
+        // 取り消されてしまうため、ドラッグと同じく捕捉しておく
+        try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+      }
+      return;
+    }
     // ドラッグ中の追加の押下は無視する。
     // マウスの右ボタンなど、主ボタン以外もドラッグ開始に使わない
     // （右クリック併用でドラッグ状態が壊れる不具合の対策）
@@ -1588,21 +1922,29 @@
     if (!e.isPrimary) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     removeGhost(); // 取り残しの掃除
+    pageSwipe = null;
     const pos = cellFromPoint(e.clientX, e.clientY);
     if (!pos) return;
     // タップ判定用に押下を記録する（ドラッグにならなかった場合に使う）
     press = { pointerId: e.pointerId, cell: pos, handled: false };
     const icon = E.iconAt(state, pos.x, pos.y);
-    if (!icon || icon.z > 0) return;
+    if (!icon) {
+      // アイコンを持っていない（空きマスから始まった）押下は、
+      // 横スワイプでページ移動する候補にする。固定アプリのマスは除く
+      if (!E.isReservedCell(pos.x, pos.y)) armPageSwipe(e);
+      return;
+    }
+    // 眠っているアイコンは掴めないので、持っていない扱いで候補を立てる
+    if (icon.z > 0) { armPageSwipe(e); return; }
     // 導入フロー中は、範囲内（誘導中は対象）のアイコンだけ掴める
-    if (!tutOperableIcon(currentPage(), icon)) return;
+    if (!tutOperableIcon(currentPage(), icon)) { armPageSwipe(e); return; }
     if (icon.mood === 'rebel') {
       // 反抗アイコンは掴むと反抗マークが育ち始め、掴み続けると発動する
       // （2026-11-12 ユーザー指定の演出・案3）。演出中に離したらキャンセル
       press.handled = true;
       tapSel = null;
-      startPendingAct(icon, 'rebel', e.pointerId);
-      e.preventDefault();
+      startPendingAct(icon, 'rebel', e.pointerId, e.clientX, e.clientY);
+      armPageSwipe(e);
       return;
     }
     if (icon.type === 'warp') {
@@ -1629,15 +1971,14 @@
           startX: e.clientX, startY: e.clientY,
           active: false, ghost: null, hoverKey: null,
         };
-        try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
-        e.preventDefault();
+        armPageSwipe(e);
         return;
       }
       // 通常時は掴むとタメ（ジャンプ前の予備動作）に入り、掴み続けると
       // 発動する（2026-11-12 ユーザー指定の演出）。演出中に離したら
       // キャンセル。やる気のときは上のドラッグ行き先選びになる
-      startPendingAct(icon, 'warp', e.pointerId);
-      e.preventDefault();
+      startPendingAct(icon, 'warp', e.pointerId, e.clientX, e.clientY);
+      armPageSwipe(e);
       return;
     }
     // 候補マスの集合は intent によらず共通（解決の仕方だけが変わる）ため、
@@ -1647,8 +1988,9 @@
     if (tutActive(currentPage())) {
       dests = dests.filter(d => tutAllowsMove(currentPage(), icon.id, d));
     }
-    if (dests.length === 0) return;
+    if (dests.length === 0) { armPageSwipe(e); return; }
     const tutGuideNow = tutGuide(currentPage());
+    armPageSwipe(e);
     drag = {
       iconId: icon.id, fromX: pos.x, fromY: pos.y,
       startX: e.clientX, startY: e.clientY, pointerId: e.pointerId,
@@ -1663,6 +2005,14 @@
   });
 
   wrapEl.addEventListener('pointermove', (e) => {
+    if (pendingAct) {
+      if (e.pointerId !== pendingAct.pointerId) return;
+      // タメ中に指が動いたら長押しは取り消す（長押しとドラッグは
+      // 先に成立したほうだけを実行する。2026-11-15 GPT提案の採用）。
+      // 取り消した押下はそのまま終わり、ドラッグには化けない
+      if (Math.hypot(e.clientX - pendingAct.startX, e.clientY - pendingAct.startY) >= 8) cancelPendingAct();
+      return;
+    }
     if (warpDrag) {
       if (e.pointerId !== warpDrag.pointerId) return;
       const wdx = e.clientX - warpDrag.startX;
@@ -1670,6 +2020,7 @@
       if (!warpDrag.active) {
         if (Math.hypot(wdx, wdy) < 8) return;
         warpDrag.active = true;
+        pageSwipe = null; // 実際に持ち上げたので、もうページ移動しない
         warpDrag.ghost = createDragGhost(warpDrag.iconId);
         render(state.icons, warpDrag.iconId); // 持ったワープは盤面から消える
       }
@@ -1678,12 +2029,16 @@
       warpDragHover(e.clientX, e.clientY);
       return;
     }
+    if (pageSwipe && e.pointerId === pageSwipe.pointerId && !drag && !warpDrag && !pendingAct) {
+      pageSwipeMove(e);
+    }
     if (!drag || e.pointerId !== drag.pointerId) return;
     const dx = e.clientX - drag.startX;
     const dy = e.clientY - drag.startY;
     if (!drag.active) {
       if (Math.hypot(dx, dy) < 8) return;
       drag.active = true;
+      pageSwipe = null; // 実際に持ち上げたので、もうページ移動しない
       tapSel = null; // ドラッグが始まったらタップ選択は解除する
       drag.ghost = createDragGhost(drag.iconId);
       render(state.icons, drag.iconId); // 持ったアイコンは盤面から消える
@@ -1745,6 +2100,35 @@
       finishPointer(false, e.clientX, e.clientY);
       return;
     }
+    // ページ移動スワイプ：指についてくるスライドが始まっていたら、
+    // 離した位置（盤面幅の40%を超えたか）で隣へ進むか戻るかを決める。
+    // スライドが始まっていない速いフリックは、離した位置が40%を
+    // 超えたときだけスライドで切り替える（勢いでは決めない）
+    if (pageSlide && pageSlide.pointerId === e.pointerId) {
+      pageSwipe = null;
+      press = null;
+      if (!pageSlide.settling) {
+        finishPageSlide(Math.abs(pageSlide.offset - pageSlide.base) >= pageSlide.width * PAGE_SLIDE_RATIO);
+      }
+      return;
+    }
+    if (pageSwipe) {
+      if (e.pointerId !== pageSwipe.pointerId) return;
+      const sdx = e.clientX - pageSwipe.startX;
+      const sdy = e.clientY - pageSwipe.startY;
+      pageSwipe = null;
+      const w = boardEl.getBoundingClientRect().width;
+      if (Math.abs(sdx) > Math.abs(sdy) && w > 0 && Math.abs(sdx) >= w * PAGE_SLIDE_RATIO) {
+        const dir = sdx < 0 ? 1 : -1;
+        const to = pageIndex + dir;
+        if (to >= 0 && to < pages.length) {
+          press = null;
+          if (engagePageSlide(dir, null)) finishPageSlide(true);
+          else switchPage(to);
+          return;
+        }
+      }
+    }
     // ドラッグにならなかった押下（眠っているアイコン・空きマスなど）もタップとして扱う
     if (press && e.pointerId === press.pointerId) {
       const p = press;
@@ -1753,6 +2137,12 @@
     }
   }
   function onPointerCancel(e) {
+    if (pageSlide && pageSlide.pointerId === e.pointerId) {
+      pageSwipe = null;
+      press = null;
+      if (!pageSlide.settling) finishPageSlide(false);
+    }
+    if (pageSwipe && e.pointerId === pageSwipe.pointerId) pageSwipe = null;
     if (pendingAct) {
       if (e.pointerId !== pendingAct.pointerId) return;
       cancelPendingAct();
@@ -1940,9 +2330,19 @@
     wallpaperSheet.hidden = true;
     settingsSheet.hidden = true;
   }
-  // プリセット一覧（サムネイル）を組み立てる
-  document.getElementById('wallpaperGrid').innerHTML = WALLPAPER_PRESETS.map(p =>
-    `<button class="wallpaper-thumb" type="button" data-preset-id="${p.id}"><img src="${p.src}" alt=""><span>${p.name}</span></button>`
+  // プリセット一覧（サムネイル）を分類ごとに組み立てる
+  // （2026-11-15 ユーザー指示。分類は見た目で決めた）
+  const WALLPAPER_GROUPS = [
+    { title: '空と宇宙', ids: [1, 4, 10, 16] },
+    { title: '自然', ids: [5, 8, 11, 12, 15] },
+    { title: 'カラフル・柄', ids: [2, 3, 6, 9, 13] },
+    { title: 'かわいい', ids: [7, 14] },
+  ];
+  document.getElementById('wallpaperGrid').innerHTML = WALLPAPER_GROUPS.map(g =>
+    `<p class="wallpaper-group-title">${g.title}</p><div class="wallpaper-grid">` +
+    g.ids.map(id => WALLPAPER_PRESETS.find(p => p.id === id)).filter(Boolean).map(p =>
+      `<button class="wallpaper-thumb" type="button" data-preset-id="${p.id}"><img src="${p.src}" alt=""><span>${p.name}</span></button>`
+    ).join('') + '</div>'
   ).join('');
   document.querySelectorAll('.wallpaper-thumb').forEach(el => {
     el.addEventListener('click', () => {
@@ -2304,8 +2704,17 @@
       seTone({ freq: f, type: 'triangle', delay: i * 0.16, dur: 0.30, peak: 0.28 });
     });
   }
+  // やる気で変えられたアイコンの目印（光）の期限
+  const convertFlashUntil = new Map();
   function playEventSounds(events) {
     if (!events || !events.length) return;
+    for (const e of events) {
+      if (e.kind === 'converted') {
+        convertFlashUntil.set(e.iconId, Date.now() + 750);
+        const st = wrapEl.querySelector(`.icon-stack[data-icon-id="${e.iconId}"]`);
+        if (st) st.classList.add('converted-flash');
+      }
+    }
     if (events.some(e => e.kind === 'converted')) seConvert();
     if (events.some(e => e.kind === 'warp')) seWarp();
     if (events.some(e => e.kind === 'predation')) seEat();
@@ -2438,15 +2847,15 @@
   // 消灯はリアルタイム制の導入（同日）で達成可能になったため追加した
   const ACH_KEY = 'homeMerge.achievements.v1';
   const ACH_DEFS = [
-    { id: 'firstMove', group: '通常', name: '初出勤', desc: '初めてアイコンを移動させる' },
-    { id: 'firstMerge', group: '通常', name: 'はじめの一歩', desc: '初めて合体する' },
-    { id: 'firstEager', group: '通常', name: 'ごきげんよう', desc: '初めてやる気状態になる' },
-    { id: 'firstRebel', group: '通常', name: '不良社員', desc: '初めて反抗状態になる' },
-    { id: 'merges10', group: '通常', name: '二人三脚', desc: '1回のプレイで10回合体する' },
-    { id: 'count3', group: '通常', name: '若手', desc: '数3のアイコンを作る' },
-    { id: 'count4', group: '通常', name: '中堅', desc: '数4のアイコンを作る' },
-    { id: 'wakes30', group: '通常', name: '寝る子は育つ', desc: '1回のプレイで、アイコンが目覚めるのが累計30回になる' },
-    { id: 'firstClear', group: '通常', name: '電池切れ', desc: '初めてクリアする' },
+    { id: 'firstMove', group: '初級', name: '初出勤', desc: '初めてアイコンを移動させる' },
+    { id: 'firstMerge', group: '初級', name: 'はじめの一歩', desc: '初めて合体する' },
+    { id: 'firstEager', group: '初級', name: 'ごきげんよう', desc: '初めてやる気状態になる' },
+    { id: 'firstRebel', group: '初級', name: '不良社員', desc: '初めて反抗状態になる' },
+    { id: 'merges10', group: '初級', name: '二人三脚', desc: '1回のプレイで10回合体する' },
+    { id: 'count3', group: '初級', name: '若手', desc: '数3のアイコンを作る' },
+    { id: 'count4', group: '初級', name: '中堅', desc: '数4のアイコンを作る' },
+    { id: 'wakes30', group: '初級', name: '寝る子は育つ', desc: '1回のプレイで、アイコンが目覚めるのが累計30回になる' },
+    { id: 'firstClear', group: '初級', name: '電池切れ', desc: '初めてクリアする' },
     { id: 'merges20', group: '中級', name: '大所帯', desc: '1回のプレイで20回合体する' },
     { id: 'count5', group: '中級', name: '大器晩成', desc: '数5のアイコンを作る' },
     { id: 'eagerMoves5', group: '中級', name: '仕事熱心', desc: '1回のプレイで、やる気状態のアイコンを5回動かす' },
@@ -2478,7 +2887,13 @@
     { id: 'buyOu', group: 'アプリ', name: '即位', desc: 'ストアでオウを購入する' },
     { id: 'buyAll', group: 'アプリ', name: '大人買い', desc: '1回のプレイで特殊アイコンをすべて購入する' },
   ];
-  const ACH_GROUPS = ['通常', '中級', '上級', '隠し', 'アプリ'];
+  const ACH_GROUPS = ['初級', '中級', '上級', 'アプリ', '隠し'];
+  // トロフィーの色は段階ごとに変える（2026-11-15 夜、ユーザー
+  // 指示）：初級＝銅、中級＝銀、上級＝金、隠し＝ピンクブロンド、
+  // アプリ＝赤。絵文字の🏆は色を変えられないので、色を付け
+  // られる SVG のトロフィーを使う（色は CSS の color で決まる）
+  const ACH_TIER_CLASS = { '初級': 'tier-bronze', '中級': 'tier-silver', '上級': 'tier-gold', '隠し': 'tier-pink', 'アプリ': 'tier-red' };
+  const ACH_CUP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 3h10v4.2a5 5 0 0 1-10 0Z"/><path d="M7 4.2H3.8v1.6a3.4 3.4 0 0 0 3.4 3.4Z"/><path d="M17 4.2h3.2v1.6a3.4 3.4 0 0 1-3.4 3.4Z"/><path d="M11 11.4h2v3.4h-2z"/><path d="M8.2 14.8h7.6v1.8H8.2z"/><path d="M6.4 17.8h11.2v2H6.4z"/></svg>';
   // unseen は「解除されたのに実績画面をまだ開いていない」件数。
   // 0でなければドックの実績アイコンに赤丸が出る（2026-11-13 ユーザー指示）
   let achData = { unlocked: {}, totals: { conversions: 0 }, unseen: 0 };
@@ -2515,16 +2930,19 @@
   // 解除されたら1つずつ順番に出す
   const achToastEl = document.getElementById('achToast');
   const achToastNameEl = document.getElementById('achToastName');
+  const achToastIconEl = achToastEl.querySelector('.ach-island-icon');
   const achToastQueue = [];
   let achToastBusy = false;
-  function showAchToast(name) {
-    achToastQueue.push(name);
+  function showAchToast(name, tierClass) {
+    achToastQueue.push({ name, tierClass });
     if (achToastBusy) return;
     achToastBusy = true;
     const next = () => {
-      const n = achToastQueue.shift();
-      if (n === undefined) { achToastBusy = false; return; }
-      achToastNameEl.textContent = n;
+      const item = achToastQueue.shift();
+      if (item === undefined) { achToastBusy = false; return; }
+      achToastNameEl.textContent = item.name;
+      achToastIconEl.innerHTML = ACH_CUP_SVG;
+      achToastIconEl.className = 'ach-island-icon ' + (item.tierClass || '');
       achToastEl.hidden = false;
       setTimeout(() => { achToastEl.hidden = true; setTimeout(next, 200); }, 2800);
     };
@@ -2543,7 +2961,7 @@
     achSave();
     updateAchDot();
     seAchievement();
-    showAchToast(def.name);
+    showAchToast(def.name, ACH_TIER_CLASS[def.group]);
   }
   // イベントの束から判定するもの（移動とリアルタイム tick で共用）
   function achProcessEvents(events) {
@@ -2604,6 +3022,14 @@
   // 移動が確定するたびに呼ばれる判定の本体。result はエンジンの
   // 移動結果（applyMove / applyRebelMove / applyWarpSwap のどれでもよい）
   function achOnMove(result) {
+    // クリア（合体数3）は移動で起きるようになったので、時計側と
+    // 同じく、勝ったページでは次のページを解放する
+    // （2026-11-15 の勝敗変更に伴う配線）。クリアは黒画面を挟まず
+    // そのまま覆いを出すため、充電済みの扱いにしておく
+    if (result && result.ok && state.status === 'won') {
+      currentPage().charged = true;
+      onStageCleared(currentPage());
+    }
     if (!result || !result.ok || !achRun) return;
     const events = result.events || [];
     achUnlock('firstMove');
@@ -2640,7 +3066,7 @@
     if (!achRun) return;
     achProcessEvents(events || []);
     achBoardChecks();
-    // バッテリー切れ（時間制）でのクリアも、移動でのクリアと同じ実績対象
+    // tick 経由の終了（バッテリー切れの敗北など）も、移動と同じ実績判定を通す
     if ((events || []).some(e => e.kind === 'won')) {
       achUnlock('firstClear');
       if (state.icons.length <= 10) achUnlock('clearLean');
@@ -2676,24 +3102,36 @@
   const trophySheet = document.getElementById('trophySheet');
   const achSummaryEl = document.getElementById('achSummary');
   const achListEl = document.getElementById('achList');
+  // 実績画面は分類のタブ方式（2026-11-15 夜、ユーザー指示）：
+  // 分類を横一列に並べ、押した分類の実績だけを下に出す
+  let achTab = '初級';
   function renderAchievements() {
     const done = ACH_DEFS.filter(d => achData.unlocked[d.id]).length;
     achSummaryEl.textContent = `解除 ${done} / ${ACH_DEFS.length}`;
-    achListEl.innerHTML = ACH_GROUPS.map(g => {
-      const rows = ACH_DEFS.filter(d => d.group === g).map(d => {
-        const unlocked = !!achData.unlocked[d.id];
-        const hiddenLocked = g === '隠し' && !unlocked;
-        const name = hiddenLocked ? '？？？' : d.name;
-        let desc = hiddenLocked ? '？？？' : d.desc;
-        if (d.id === 'convertTotal10' && !unlocked) {
-          desc += `（通算 ${Math.min(achData.totals.conversions, 10)} / 10）`;
-        }
-        return `<div class="icon-row ach-row${unlocked ? ' done' : ''}"><span class="ach-mark" aria-hidden="true">${unlocked ? '🏆' : '🔒'}</span>`
-          + `<div><div class="icon-row-name">${name}</div><div class="icon-row-desc">${desc}</div></div></div>`;
-      }).join('');
-      return `<p class="wallpaper-group-title">${g}</p><div class="settings-list">${rows}</div>`;
+    const g = achTab;
+    // 隠し分類のタブの文字は「？？？」にする（2026-11-15 夜、
+    // ユーザー指示。中身の分類名は '隠し' のまま）
+    const tabs = ACH_GROUPS.map(t =>
+      `<button type="button" class="ach-tab ${ACH_TIER_CLASS[t] || ''}${t === g ? ' active' : ''}" data-ach-tab="${t}">${t === '隠し' ? '？？？' : t}</button>`).join('');
+    const rows = ACH_DEFS.filter(d => d.group === g).map(d => {
+      const unlocked = !!achData.unlocked[d.id];
+      const hiddenLocked = g === '隠し' && !unlocked;
+      const name = hiddenLocked ? '？？？' : d.name;
+      let desc = hiddenLocked ? '？？？' : d.desc;
+      if (d.id === 'convertTotal10' && !unlocked) {
+        desc += `（通算 ${Math.min(achData.totals.conversions, 10)} / 10）`;
+      }
+      return `<div class="icon-row ach-row${unlocked ? ' done' : ''}"><span class="ach-mark ${ACH_TIER_CLASS[g] || ''}" aria-hidden="true">${unlocked ? ACH_CUP_SVG : '🔒'}</span>`
+        + `<div><div class="icon-row-name">${name}</div><div class="icon-row-desc">${desc}</div></div></div>`;
     }).join('');
+    achListEl.innerHTML = `<div class="ach-tabs">${tabs}</div><div class="settings-list">${rows}</div>`;
   }
+  achListEl.addEventListener('click', (e) => {
+    const btn = e.target.closest && e.target.closest('[data-ach-tab]');
+    if (!btn) return;
+    achTab = btn.dataset.achTab;
+    renderAchievements();
+  });
   document.getElementById('trophyBack').addEventListener('click', () => {
     trophySheet.hidden = true;
   });
@@ -2800,26 +3238,14 @@
     const course = COURSES.find(c => c.id === page.courseId);
     const t = page.elapsedSec;
     const events = [];
-    // バッテリー（0になったらその時点でクリア。設置の満杯より先に判定）
+    // バッテリー（0になったらその時点でゲームオーバー。設置の満杯より先に判定）
     if (s.config.batterySecPerPercent > 0 && t % s.config.batterySecPerPercent === 0) {
       const r = E.tickBattery(s);
       if (r.ok) events.push(...r.events);
       if (s.status !== 'playing') { finishClockSecond(page, events); return false; }
     }
-    // 眠りは設置と切り離した個別タイマー（2026-11-14夜 ユーザー決定）：
-    // 眠ったアイコンごとに、眠ってから sleepSecPerZ 秒たつと z が1減り、
-    // 0になったら目覚め抽選。設置のタイミングに合わせても、他の
-    // アイコンを動かしても、休みの長さは変わらない（即2回行動の防止）
-    const secPerZ = s.config.sleepSecPerZ || 3;
-    for (const icon of s.icons) {
-      if (icon.z <= 0) continue;
-      icon.sleepProgress = (icon.sleepProgress || 0) + 1;
-      while (icon.z > 0 && icon.sleepProgress >= secPerZ) {
-        icon.sleepProgress -= secPerZ;
-        E.advanceSleepOne(s, icon, events);
-      }
-      if (icon.z === 0) icon.sleepProgress = 0;
-    }
+    // 眠りの前進はミリ秒単位の個別タイマー側（advanceSleepMs）が担う。
+    // ここ（1秒単位の時計）では進めない
     // 設置は従来どおりコースの間隔で（開始遅延がある間は入らない）
     const delay = course.installDelaySec || 0;
     if (course.installIntervalSec > 0 && t >= delay && (t - delay) % course.installIntervalSec === 0) {
@@ -2834,7 +3260,7 @@
       playEventSounds(events);
       achOnTick(events);
     }
-    if (page.state.status === 'won') unlockNextPage();
+    if (page.state.status === 'won') { page.charged = true; onStageCleared(page); }
     if (events.some(e => e.kind === 'won' || e.kind === 'lost')) renderPageBar();
     savePages(true);
     if (page === currentPage()) {
@@ -2852,25 +3278,71 @@
   // 3秒で目覚める。停止中の仕掛けが表に見えないようにするための扱い。
   // 進め方は自由プレイの個別タイマーと同じで、機嫌は流れの間は
   // 出さない（tutAfterMove と同じく通常に戻す）
-  function progressFlowSleep(page) {
+  // 眠りの前進（ミリ秒単位、2026-11-15 ユーザー指示で秒単位から変更）：
+  // 寝た瞬間から実時間で sleepSecPerZ 秒ぴったり数える。以前は時計の
+  // 1秒刻みに +1 していたため、寝た時点で途中まで進んでいた秒も
+  // 1秒分に数えられ、実際は2秒ほどで起きてしまっていた。
+  // onlyIds を渡すと、そのアイコンだけを進める（ドラッグ中に溜まった
+  // 時間の消化用：溜まった時間は、ドラッグ開始時点で寝ていた
+  // アイコンにだけ流す。今まさに寝たアイコンには流さない）
+  function advanceSleepMs(page, ms, onlyIds) {
     const s = page.state;
-    const secPerZ = s.config.sleepSecPerZ || 3;
+    const need = (s.config.sleepSecPerZ || 3) * 1000;
     const events = [];
+    let changed = false;
     for (const icon of s.icons) {
       if (icon.z <= 0) continue;
-      icon.sleepProgress = (icon.sleepProgress || 0) + 1;
-      while (icon.z > 0 && icon.sleepProgress >= secPerZ) {
-        icon.sleepProgress -= secPerZ;
+      if (onlyIds && !onlyIds.includes(icon.id)) continue;
+      icon.sleepMs = (icon.sleepMs || 0) + ms;
+      while (icon.z > 0 && icon.sleepMs >= need) {
+        icon.sleepMs -= need;
         E.advanceSleepOne(s, icon, events);
+        changed = true;
       }
-      if (icon.z === 0) icon.sleepProgress = 0;
+      if (icon.z === 0) icon.sleepMs = 0;
     }
-    if (!events.some(e => e.kind === 'wake')) return false;
-    for (const icon of s.icons) {
-      if (icon.mood !== 'normal') icon.mood = 'normal';
+    return { events, changed };
+  }
+  // 眠りが進んだあとの始末。流れの中（flowMode）では機嫌を出さない。
+  // 戻り値： 目覚めが起きたか
+  function settleSleep(page, r, flowMode) {
+    if (!r.changed && !r.events.length) return false;
+    const woke = r.events.some(e => e.kind === 'wake');
+    if (flowMode) {
+      for (const icon of page.state.icons) {
+        if (icon.mood !== 'normal') icon.mood = 'normal';
+      }
+    } else if (r.events.length) {
+      playEventSounds(r.events);
+      achOnTick(r.events);
     }
     savePages(true);
-    return true;
+    if (r.changed && page === currentPage()) render(state.icons, null);
+    return woke;
+  }
+  // ドラッグ・タメで時計が止まっている間、眠りの時間も溜める。
+  // 溜め始めた時点で寝ていたアイコンの id を一緒に覚えておき、
+  // 解放時にそのアイコンへだけ溜まった時間を流す
+  let sleepWasBlocked = false;
+  function bankSleepTime(page, dt, blocked, flowMode) {
+    if (blocked) {
+      if (!sleepWasBlocked) {
+        page.sleepBankIds = page.state.icons.filter(i => i.z > 0).map(i => i.id);
+        page.sleepBankMs = 0;
+        page.sleepBankFlow = flowMode;
+      }
+      page.sleepBankMs = (page.sleepBankMs || 0) + dt;
+    }
+    sleepWasBlocked = blocked;
+  }
+  function flushSleepBank(page, flowMode) {
+    if (!page.sleepBankMs) return;
+    const ms = page.sleepBankMs;
+    const ids = page.sleepBankIds || [];
+    page.sleepBankMs = 0;
+    page.sleepBankIds = null;
+    page.sleepBankFlow = false;
+    settleSleep(page, advanceSleepMs(page, ms, ids), flowMode);
   }
   let clockLastAt = Date.now();
   setInterval(() => {
@@ -2885,28 +3357,21 @@
     // 流れ側の扱い（機嫌を出さない）で消化する。ここを省くと、寝た
     // アイコンの目覚めが自由プレイ側にこぼれて機嫌や説明カードが
     // 出てしまい、終わりの案内文が隠れる
-    if (page._flowWasActive && !tutActive(page) && page.flowSleepMs >= 1000) {
-      let woke = false;
-      while (page.flowSleepMs >= 1000) {
-        page.flowSleepMs -= 1000;
-        if (progressFlowSleep(page)) woke = true;
-      }
-      if (woke) render(state.icons, null);
+    if (page._flowWasActive && !tutActive(page) && page.sleepBankMs > 0 && page.sleepBankFlow) {
+      flushSleepBank(page, true);
     }
     page._flowWasActive = tutActive(page);
-    if (tutActive(page) || tutGoalActive()) {
+    if (tutActive(page) || tutAnyGoalActive()) {
       // 導入フロー中は時間を止める。ただし眠りだけは実時間で進める
-      // （上の progressFlowSleep）。ドラッグ中は進めた結果を描かず、
-      // 時間だけ溜めて離したときに反映する（自由プレイの時計と同じ）
+      // （ミリ秒単位でぴったり数える）。ドラッグ中は時間だけ溜めて、
+      // 離したときに、ドラッグ開始時点で寝ていたアイコンへだけ
+      // 流す（自由プレイの時計と同じ考え方）
       if (!document.hidden) {
-        page.flowSleepMs = (page.flowSleepMs || 0) + dt;
-        if (!(drag || warpDrag || pendingAct)) {
-          let woke = false;
-          while (page.flowSleepMs >= 1000) {
-            page.flowSleepMs -= 1000;
-            if (progressFlowSleep(page)) woke = true;
-          }
-          if (woke) render(state.icons, null);
+        const blocked = !!(drag || warpDrag || pendingAct);
+        bankSleepTime(page, dt, blocked, true);
+        if (!blocked) {
+          flushSleepBank(page, true);
+          settleSleep(page, advanceSleepMs(page, dt), true);
         }
       }
       return;
@@ -2914,12 +3379,21 @@
     if (document.hidden) return;
     if (anySheetOpen()) return;
     page.clockMs += dt;
+    // 眠りはミリ秒単位で別に進める。ドラッグ・タメの間は時計と
+    // 同じく時間だけ溜め、離したときに、開始時点で寝ていた
+    // アイコンへだけ流す。今まさに寝たアイコンには流さない
+    const blocked = !!(drag || warpDrag || pendingAct);
+    bankSleepTime(page, dt, blocked, false);
+    if (!blocked) {
+      flushSleepBank(page, false);
+      settleSleep(page, advanceSleepMs(page, dt), false);
+    }
     // アイコンを持っている間（ドラッグ・行き先ドラッグ・タメ）は秒を
     // 進めない。ただし時間は捨てずに溜めておき、離した瞬間に経過分を
-    // まとめて進める（設置・眠りの進行・バッテリーが一気に反映される）。
+    // まとめて進める（設置・バッテリーが一気に反映される）。
     // 2026-11-14夜にユーザー指示で変更（以前は持っている間の時間は
     // 数えない仕様だった）
-    if (drag || warpDrag || pendingAct) return;
+    if (blocked) return;
     while (page.clockMs >= 1000) {
       page.clockMs -= 1000;
       page.elapsedSec += 1;
@@ -2973,7 +3447,7 @@
   const MOOD_INTRO = {
     eager: {
       title: 'やる気',
-      text: 'やる気を動かすと、\n入れ替わった相手が同じ種類になる',
+      text: 'やる気を動かすと、\n移動したアイコンが同じ種類になる',
     },
     rebel: {
       title: '反抗',
@@ -3141,7 +3615,7 @@
       openConfirm({
         title: '本当に初期化しますか',
         text: '最後の確認です。元には戻せません。サウンドや壁紙の設定も初期状態に戻ります。',
-        okLabel: '本当に初期化する',
+        okLabel: '初期化する',
       }, () => {
         wipingAll = true; // 以後の保存（beforeunload 含む）を止めてから消す
         try {

@@ -13,7 +13,7 @@
     <span class="notch" aria-hidden="true"></span>
     <span class="status-right">
       <span id="statusText"></span>
-      <span class="battery" aria-hidden="true"><span class="battery-body"><span id="batteryFill"></span><span id="batteryText">100%</span></span><span class="battery-cap"></span></span>
+      <span class="battery" aria-hidden="true"><span class="battery-body"><span class="battery-gauge"><span id="batteryFill"></span></span><svg class="battery-bolt" id="batteryBolt" width="9" height="13" viewBox="0 0 10 14" hidden><polygon points="6.6,0 1,8 4.3,8 3.2,14 9,5.6 5.7,5.6" fill="#fff" stroke="rgba(0,0,0,.28)" stroke-width="0.7"/></svg></span><span class="battery-cap"></span></span>
     </span>
   </div>
 
@@ -25,6 +25,7 @@
     <div class="dock"><div id="dock-grid"></div></div>
 
     <div class="lose-panel" id="losePanel" hidden>
+      <div class="stage-select" id="stageSelect" hidden></div>
       <p class="lose-title">ゲームオーバー</p>
       <p class="lose-text">ホーム画面が一杯になりました。</p>
       <button id="loseResetBtn" class="lose-reset" type="button" aria-label="リセット">
@@ -56,7 +57,7 @@
       <button id="wallpaperDefaultBtn" class="settings-item" type="button">デフォルトに戻す</button>
     </div>
     <p class="wallpaper-group-title">用意された壁紙から選ぶ</p>
-    <div class="wallpaper-grid" id="wallpaperGrid"></div>
+    <div id="wallpaperGrid"></div>
   </div>
 
   <div class="sound-sheet" id="soundSheet" hidden>
@@ -144,6 +145,8 @@
     <span class="ach-island-icon" aria-hidden="true">🏆</span>
     <span class="ach-island-name" id="achToastName"></span>
   </div>
+
+  <div class="notch-label" id="notchLabel" aria-label="合体数3を作ったらクリア"><span class="mini-generic"><span class="mini-eyes"><i></i><i></i></span><span class="mini-badge"><span class="mini-badge-num">3</span></span></span>を作ったらクリア</div>
 
   <div class="power-overlay" id="powerOverlay" hidden>
     <div class="power-body">

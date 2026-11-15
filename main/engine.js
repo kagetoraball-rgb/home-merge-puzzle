@@ -38,9 +38,10 @@ const TYPES = {
 const TYPE_IDS = Object.keys(TYPES);
 // 通常アイコン4種（インストールで出てくるのはこの中からだけ）
 const NORMAL_TYPE_IDS = TYPE_IDS.filter(id => !TYPES[id].special);
-// ストアの品揃え（表示順）と価格（2026-11-12 決定）
+// ストアの品揃え（表示順）と価格（2026-11-15 ユーザー決定で
+// 16/32/64 から値下げ）
 const SPECIAL_IDS = ['warp', 'spin', 'ou'];
-const PRICES = { warp: 16, spin: 32, ou: 64 };
+const PRICES = { warp: 10, spin: 20, ou: 40 };
 
 // 性格補正（2026-11-13 ユーザー決定。メイン版のみ）。
 // rebel / eager は目覚め時の機嫌抽選の確率、sleep は移動1マスごとに
@@ -68,8 +69,9 @@ const DEFAULT_CONFIG = {
   rows: 7, // 2026-11-11 ユーザー指定で 8→7（盤面は 4×7=28マス）
   batteryStart: 100,
   batteryPerMove: 1,   // 旧方式（手数制）: 100回移動でクリア。コース制では 0 にして時間制へ
-  batterySecPerPercent: 0, // 時間制バッテリー（2026-11-13 ユーザー決定：チュートリアル基準で 1%＝12秒、15%を3分で消費）。0 の間は時間では減らない。減らす間隔そのものはアプリ側の時計が数え、tickBattery を呼ぶ
+  batterySecPerPercent: 0, // 時間制バッテリー（チュートリアル基準の換算はアプリ側で 1%＝6秒＝100%で10分、チュートリアル30%を3分で消費。2026-11-15 夜に 1%＝12秒から変更）。0 の間は時間では減らない。減らす間隔そのものはアプリ側の時計が数え、tickBattery を呼ぶ
   installEvery: 2,     // （旧方式）2回の移動ごとに1個インストール。installIntervalSec が有効な間は使われない
+  winCount: 3, // クリアになる合体数（2026-11-16：コースごとに変えられるようにした。2ページ目は4）
   installIntervalSec: 5, // リアルタイム制（2026-11-13 ユーザー指定でメイン版もフォルダ版と同じ時間連動へ）：プレイ中、5秒ごとに tick（眠りの進行＋1個インストール）
   // 機嫌抽選の確率は PERSONALITY（種類別）が正本。以下の2つは表に無い
   // 種類向けの予備値としてだけ使う
@@ -110,6 +112,7 @@ function makeIcon(type, x, y, opts = {}) {
     orient: opts.orient ?? 0, // スピンの向き（0..3、90度右回転の回数）。他種では未使用
     spun: opts.spun ?? false, // スピンが一度でも回転したか（目の切り替えに使う）
     sleepProgress: opts.sleepProgress ?? 0, // 個別タイマーの進み（秒）。次の z 減少までの蓄積
+    sleepMs: opts.sleepMs ?? 0, // 個別タイマーの進み（ミリ秒、アプリ側が実時間で加算）。次の z 減少までの蓄積
   };
 }
 
@@ -419,9 +422,9 @@ function advanceSleepOne(state, icon, events) {
  *   当たった分だけ眠る（上限3、やる気でも同様。0なら眠らない）
  * - インストールはリアルタイム制の tick が担う（installIntervalSec が
  *   無効な場合だけ、旧方式の移動連動インストールが働く）
- * - 勝敗判定（バッテリー0で勝ち / 全マス埋まると負け）
+ * - 勝敗判定（合体数3を作ると勝ち / バッテリー0か全マス埋まると負け）
  */
-function progressAfterMove(state, resultId, distance, wasEager) {
+function progressAfterMove(state, resultId, distance, wasEager, madeCount = null) {
   const events = [];
   state.moves += 1;
   state.battery = Math.max(0, state.battery - state.config.batteryPerMove);
@@ -437,15 +440,25 @@ function progressAfterMove(state, resultId, distance, wasEager) {
   if (result) {
     result.z = rollSleep(state, result, distance);
     result.sleepProgress = 0; // 眠り直し：個別タイマーはここから数え直す
+    result.sleepMs = 0;
     result.mood = 'normal';
     result.voided = false;
     if (result.z > 0) events.push({ kind: 'sleep', iconId: result.id, z: result.z });
     if (wasEager) events.push({ kind: 'eagerConsumed', iconId: result.id });
   }
 
-  if (state.battery <= 0) {
+  // クリア判定（2026-11-15 ユーザー決定で変更）：合体や捕食で
+  // 目標の合体数（config.winCount、通常は3）のアイコンを作ったら
+  // クリア。バッテリー切れは勝ちではなくゲームオーバーになった
+  if (madeCount === state.config.winCount && state.status === 'playing') {
     state.status = 'won';
     events.push({ kind: 'won' });
+    return events;
+  }
+
+  if (state.battery <= 0) {
+    state.status = 'lost';
+    events.push({ kind: 'lost' });
     return events;
   }
 
@@ -519,15 +532,16 @@ function tickInstall(state) {
   return { ok: true, events };
 }
 
-// 時間制バッテリーの tick：1% 減らし、0 になったらクリア。
+// 時間制バッテリーの tick：1% 減らし、0 になったらゲームオーバー
+// （2026-11-15 ユーザー決定。以前は0でクリアだった）。
 // 減らす間隔（batterySecPerPercent 秒）はアプリ側の時計が数える
 function tickBattery(state) {
   if (state.status !== 'playing') return { ok: false, events: [] };
   const events = [];
   state.battery = Math.max(0, state.battery - 1);
   if (state.battery <= 0) {
-    state.status = 'won';
-    events.push({ kind: 'won' });
+    state.status = 'lost';
+    events.push({ kind: 'lost' });
   }
   return { ok: true, events };
 }
@@ -596,7 +610,9 @@ function applyMove(state, iconId, dest) {
     events.push({ kind: 'coins', amount: gained, total: state.coins });
   }
   if (wasEager) convertDisplaced(state, beforePos, icon.type, events);
-  events.push(...progressAfterMove(state, sim.resultId, sim.steps, wasEager));
+  const madeIcon = sim.merged ? state.icons.find(i => i.id === sim.resultId) : null;
+  events.push(...progressAfterMove(state, sim.resultId, sim.steps, wasEager,
+    madeIcon ? madeIcon.count : null));
   return { ok: true, steps: sim.steps, merged: sim.merged, intent, events };
 }
 
@@ -731,7 +747,7 @@ function applyRebelMove(state, iconId) {
     }
     icon.x = land.x;
     icon.y = land.y;
-    events.push(...progressAfterMove(state, icon.id, 1, false));
+    events.push(...progressAfterMove(state, icon.id, 1, false, predation ? icon.count : null));
     return { ok: true, x: land.x, y: land.y, predation, events, rebel: true };
   }
   // 方向ごとに着地点の候補を集める（スピンは現在の向きの方向で）
@@ -772,7 +788,7 @@ function applyRebelMove(state, iconId) {
   icon.x = land.x; icon.y = land.y;
   // スピンの反抗移動も「自分で動いた」ので90度右回転する
   if (icon.type === 'spin') { icon.orient = ((icon.orient ?? 0) + 1) % 4; icon.spun = true; }
-  events.push(...progressAfterMove(state, icon.id, land.dist, false));
+  events.push(...progressAfterMove(state, icon.id, land.dist, false, predation ? icon.count : null));
   return { ok: true, steps: land.dist, predation, x: land.x, y: land.y, events };
 }
 

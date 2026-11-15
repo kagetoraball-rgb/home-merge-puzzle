@@ -259,9 +259,10 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
      ユーザー指摘）：200px 固定だと、窓が小さい／拡大表示のときに
      盤面だけ縮んでノッチの比率が育ち、時刻やバッテリーに被る。
      基準サイズ（盤面幅370）で従来どおり 200×36 になる比率。
-     高さは盤面1行目に届かないよう 36px を上限にする */
+     高さの上限は 2026-11-15 夜に廃止（画面が大きいときだけ
+     ノッチが平たくなるのを防ぎ、比率を一定に保つため） */
   --notch-w: calc(var(--board-w) * 0.54);
-  --notch-h: min(calc(var(--notch-w) * 0.18), 36px);
+  --notch-h: calc(var(--notch-w) * 0.18);
   box-sizing: border-box;
   width: calc(var(--board-w) + 20px);
   height: calc((var(--board-w) + 44px) * 17 / 9 - 24px);
@@ -286,8 +287,8 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 
 /* ステータスバー（スマホ風） */
 .statusbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 2px 8px 9px; font-size: 12.5px; font-weight: 700; color: var(--ink);
+  display: grid; grid-template-columns: 1fr var(--notch-w) 1fr; align-items: center;
+  padding: 2px 8px 9px 8px; font-size: 12.5px; font-weight: 700; color: var(--ink);
   /* アプリ（シート）を開いてもステータスバーは隠れない（実機の
      スマホ準拠）。クリア演出（z-index 50）よりは下に置くので、
      画面が落ちる演出ではステータスバーも一緒に消える */
@@ -295,7 +296,9 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 /* ノッチ（2026-11-14 ユーザーが実機の写真で指示）：時刻とバッテリーの
    間の黒い部分を広げ、実機のように画面の上端にくっつけて垂らす。
-   時刻とバッテリーは両脇に収まる（ステータスバーの space-between） */
+   時刻とバッテリーは、ノッチの両脇の空き幅の真ん中に置く
+   （2026-11-16 ユーザー指示：黒い部分に寄せる）。ステータスバーを
+   「空き・ノッチ幅・空き」の3列にし、両脇の列で中央寄せする */
 .notch {
   width: var(--notch-w); height: var(--notch-h); background: #191921;
   /* ステータスバーの中央に絶対配置する。流れの中に置くと、時刻や
@@ -305,27 +308,56 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   position: absolute; left: 50%; top: -10px; transform: translateX(-50%);
   border-radius: 0 0 16px 16px;
 }
-.status-right { display: inline-flex; align-items: center; gap: 6px; }
+.statusbar #clockText { grid-column: 1; justify-self: center; }
+.status-right { display: inline-flex; align-items: center; gap: 6px; grid-column: 3; justify-self: center; }
+/* 時刻とバッテリーの下の辺を、ノッチ（黒い部分）の底の線に揃える
+   （2026-11-16 ユーザー選択「下の辺を底の線に揃える」。当初は
+   中心を揃えていた）。中身の中心の自然な位置は上端から
+   10+2+22/2=23px（行の高さはバッテリーの22pxで決まる）で、
+   バッテリー側の箱の高さは22px（半分11）なので、底をノッチの
+   底（上端から notch-h）に合わせるには
+   notch-h - 23 - 11 = notch-h - 34px だけずらす */
+.statusbar #clockText, .statusbar .status-right {
+  position: relative; top: calc(var(--notch-h) - 34px);
+}
+/* 時刻の箱は19pxとバッテリー側より3px低いので、底を揃える
+   ずらし量は1.5px少なくて済む */
+.statusbar #clockText { top: calc(var(--notch-h) - 32.5px); }
 #clockText { font-weight: 700; }
 #statusText { color: #bd725b; }
 .battery { display: inline-flex; align-items: center; gap: 1.5px; }
-/* 数字は電池の中に入れる（2026-11-14 ユーザー指示）。数字が読める
-   ように、電池の地は薄く明るくしておく */
+/* ラン中でないページに出し続ける充電中の⚡（2026-11-15 夜）。
+   置き場所はバッテリー本体の中の真ん中で、大きく白で出す
+   （2026-11-16 ユーザー指示）。中の%数字は廃止したので、
+   中で重なるものはない */
+.battery-bolt { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); }
+.battery-bolt[hidden] { display: none; }
+/* 本体の幅は 36→30→24→26px、元の36pxへ戻す、案B（24px）と
+   行き来した後、2026-11-16 にユーザーが案A（26px）を試すことに。
+   中の%数字は 2026-11-14 に入れたが、2026-11-16 にユーザーが
+   廃止を決めた（「1%＝6秒で測って考える作りにしない」ため）。
+   残量は緑の帯の長さと赤色で伝える */
+/* 枠は線（border）ではなく内側の影で描く（2026-11-16 ユーザー
+   指摘で変更）。線は端末の描画で 1px に丸められ、置かれた位置の
+   端数のぶん帯とずれて見えた。影は帯と同じ描き方なのでずれない。
+   箱は枠の内側（29x19）を中身として持ち、余白 1.5 と合わせて
+   外形 32x22。帯の受け幅は今までどおり 26 */
 .battery-body {
-  width: 36px; height: 16px; padding: 1.5px;
-  border: 1.5px solid #25253780; border-radius: 4.5px;
+  width: 29px; height: 19px; padding: 1.5px;
+  border: 0; border-radius: 4.5px;
+  box-shadow: inset 0 0 0 1.5px #25253780;
   display: inline-block; position: relative;
   background: rgba(255, 255, 255, .45);
 }
-#batteryFill { display: block; height: 100%; width: 100%; background: #34c759; border-radius: 2px; transition: width .3s; }
+/* 緑の帯の割合は、帯の通り道（余白の内側 26px）だけを基準に
+   する（2026-11-16 ユーザー指示）。枠は枠でしかないので、
+   割合を枠の内側の幅とは関係づけない。受け（.battery-gauge）
+   が通り道そのもので、帯はその中を割合どおりに伸びる。
+   100%で通り道いっぱいになり、余白は常に残る */
+.battery-gauge { display: block; width: calc(100% - 3px); height: 100%; margin-left: 1.5px; }
+#batteryFill { display: block; height: calc(100% - 3px); width: 100%; margin-top: 1.5px; background: #34c759; border-radius: 2px; transition: width .3s; }
 #batteryFill.low { background: #e5484d; }
 .battery-cap { width: 2.5px; height: 5px; background: #25253780; border-radius: 0 2px 2px 0; }
-#batteryText {
-  position: absolute; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: 800; color: #1a1a22;
-  font-variant-numeric: tabular-nums;
-}
 
 /* 盤面は残りの高さいっぱいに広げる。盤面の板・マス目は消してあり、
    アイコンがホーム画面に直接並ぶ見た目にする（格子と操作はそのまま） */
@@ -344,6 +376,11 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   grid-template-columns: repeat(4, 1fr);
   grid-template-rows: repeat(6, 1fr);
   background: transparent;
+  /* 盤面の端からはみ出す表示（左側に出る眠りのZなど）を切り捨てない
+     （2026-11-15 ユーザー指摘：左端のマスでZが見切れていた）。
+     抽出側の overflow:hidden をここで打ち消す。盤面の背景は
+     透明なので、角の見た目に影響はない */
+  overflow: visible;
 }
 /* ドック：画面の下端に置く半透明の専用枠。中身は盤面の最下段
    （設定・検索の固定アプリ＋右2マス）。マスの大きさは盤面と
@@ -410,7 +447,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    ステータスバーの文字色は、壁紙の上部の明るさで切り替える（wp-dark = 暗い壁紙） */
 .phone.has-wallpaper { background-size: cover; background-position: center; }
 .phone.wp-dark .statusbar { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.5); }
-.phone.wp-dark .battery-body { border-color: #ffffffb3; }
+.phone.wp-dark .battery-body { box-shadow: inset 0 0 0 1.5px #ffffffb3; }
 .phone.wp-dark .battery-cap { background: #ffffffb3; }
 .phone.wp-light .statusbar { text-shadow: 0 1px 2px rgba(255,255,255,.65); }
 
@@ -418,7 +455,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    （var(--paper)）になるので、壁紙基準の文字色（暗い壁紙では白）を
    通常色へ戻す。背後の色が変わるだけで、バー自体は常に見える */
 .phone:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) .statusbar { color: var(--ink); text-shadow: none; }
-.phone:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) .battery-body { border-color: #25253780; }
+.phone:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) .battery-body { box-shadow: inset 0 0 0 1.5px #25253780; }
 .phone:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) .battery-cap { background: #25253780; }
 
 /* サウンド画面（壁紙の変更画面と同じ作り） */
@@ -517,7 +554,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    演出が終わると発動し、途中で離すとキャンセルされる。
    反抗側の長さ 1s は app.js の REBEL_RAMPAGE_MS と合わせる。
    ワープ側の長さ 1s は app.js の WARP_CHARGE_MS と合わせる */
-.icon-stack.rampaging .app-icon .rebel-mark { animation: rebel-mark-charge 1s linear forwards; }
+.icon-stack.rampaging .app-icon .rebel-mark { animation: rebel-mark-charge .5s linear forwards; }
 @keyframes rebel-mark-charge {
   0% { transform: scale(1); }
   22% { transform: scale(1.26); }
@@ -644,6 +681,45 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 .lose-panel[hidden] { display: none; }
+/* 終了画面のステージ選択（2026-11-16）：結果表記の上に、今の
+   ステージ名と∨を出し、∨を押すと選択肢が追加の枠で開く
+   （1ページ目だけ） */
+.stage-select {
+  position: relative;
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  max-width: 92%; margin-bottom: 20px;
+}
+.stage-select-label {
+  font-size: 12px; font-weight: 700; letter-spacing: .14em;
+  color: rgba(255, 255, 255, .85);
+}
+.stage-select[hidden] { display: none; }
+.stage-toggle {
+  display: inline-flex; align-items: center; gap: 8px;
+  border: 1.5px solid rgba(255, 255, 255, .75); border-radius: 999px;
+  background: rgba(20, 20, 26, .35); color: #fff;
+  font-size: 14px; font-weight: 700; padding: 7px 14px; cursor: pointer;
+}
+.stage-toggle:active { background: rgba(20, 20, 26, .6); }
+.stage-chevron { display: inline-flex; transition: transform .15s; }
+.stage-chevron.open { transform: rotate(180deg); }
+/* 選択肢の枠は下の表示を押しのけず、上から被せる（2026-11-16
+   ユーザー指示） */
+.stage-menu {
+  position: absolute; top: calc(100% + 8px); left: 50%;
+  transform: translateX(-50%); z-index: 6;
+  display: flex; flex-direction: column; gap: 2px;
+  border: 1.5px solid rgba(255, 255, 255, .55); border-radius: 14px;
+  background: rgba(20, 20, 26, .72); padding: 6px; min-width: 170px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, .35);
+}
+.stage-menu-item {
+  border: none; border-radius: 9px; background: transparent; color: #fff;
+  font-size: 14px; font-weight: 700; padding: 8px 14px; cursor: pointer;
+  text-align: center;
+}
+.stage-menu-item:active { background: rgba(255, 255, 255, .18); }
+.stage-menu-item.current { background: rgba(255, 255, 255, .85); color: #26262e; }
 .lose-title {
   color: #fff; font-size: 27px; font-weight: 800; letter-spacing: .02em;
   margin: 0; text-shadow: 0 2px 10px rgba(0, 0, 0, .5);
@@ -660,6 +736,26 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 .lose-reset svg { width: 54px; height: 54px; fill: #fff; }
 .lose-reset:active { background: rgba(20, 20, 26, .6); }
+
+/* ページ移動のスライド（2026-11-15 夜、「軽めの組み合わせ」）：
+   切り替えの間だけ、盤面と隣のページの写しを横に並べて滑らせる。
+   入れ物で横を切り取るので、スライド中は端の表示が少し切れるが、
+   止まっているときは今まで通りはみ出して見える */
+.page-slide-viewport {
+  flex: none; width: var(--board-w); aspect-ratio: 4 / 6;
+  overflow: hidden; position: relative;
+}
+.page-slide-track { display: flex; height: 100%; will-change: transform; }
+.page-slide-slot { flex: none; position: relative; height: 100%; }
+.page-slide-slot > #board { width: 100%; height: 100%; }
+.board-clone {
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, 1fr);
+  gap: 1px; width: 100%; height: 100%; position: relative; background: transparent;
+}
+.page-slide-veil {
+  inset: 0; left: 0; transform: none; width: 100%; height: 100%;
+  aspect-ratio: auto; pointer-events: none;
+}
 
 /* 確認シート（盤面リセット・初期化の警告） */
 .confirm-sheet {
@@ -679,6 +775,11 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 .confirm-btn {
   flex: 1; border: 1px solid var(--line); background: #f2f1ec; color: var(--ink);
   font: inherit; font-size: 14.5px; padding: 11px 0; border-radius: 12px; cursor: pointer;
+  /* ラベルの長さでボタンの大きさが変わらないようにする（2026-11-15
+     ユーザー指摘：初期化の2回目の警告で「本当に初期化する」が
+     折り返してボタンが縦に伸びていた）。折り返さず、高さも固定 */
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  height: 45px; box-sizing: border-box;
 }
 .confirm-btn.danger { background: #e5484d; border-color: #e5484d; color: #fff; font-weight: 700; }
 
@@ -761,6 +862,24 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   box-shadow: 0 1px 4px rgba(0, 0, 0, .25), 0 0 0 2px rgba(0, 0, 0, .18); }
 .app-icon .fuse.col4 { background: #26262e; } /* 黒 */
 .app-icon .fuse.sq { border-radius: 32%; } /* 二巡目（数7〜）は四角 */
+/* 二巡目はひし形にする（2026-11-15 夜、ユーザー指示で四角から変更）：
+   数字は回さず、後ろに置いた同色の四角だけを45度回してひし形に
+   見せる。ひし形の幅が丸バッジの直径とほぼ同じになる大きさに
+   してある */
+.app-icon .fuse.sq { background: transparent; box-shadow: none; }
+.app-icon .fuse.sq::before {
+  content: ''; position: absolute; inset: 15%; z-index: -1;
+  transform: rotate(45deg); border-radius: 24%;
+  background: #ff3b30; box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+.app-icon .fuse.sq.col0::before { background: #e8252f; }
+.app-icon .fuse.sq.col1::before { background: #2456d6; }
+.app-icon .fuse.sq.col2::before { background: #15803d; }
+.app-icon .fuse.sq.col3::before { background: #f5f2ea;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25), 0 0 0 2px rgba(0, 0, 0, .18); }
+.app-icon .fuse.sq.col4::before { background: #26262e; }
+/* やる気で変えられたアイコンの目印：一瞬オレンジに光る */
+.icon-stack.converted-flash .app-icon { animation: flash .7s ease-out; }
 .app-icon .fuse {
   /* 中心は角の内側すぐ（LINE 実例のピクセル実測：中心＝角＋タイル幅の
      −4% / +4%、直径＝タイル幅の約37%）。角丸で実際の見える角が
@@ -830,6 +949,29 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 .trophy-sheet[hidden] { display: none; }
 .ach-row { gap: 12px; }
 .ach-row .ach-mark { font-size: 20px; width: 28px; text-align: center; flex: none; }
+/* 実績トロフィーの段階色（2026-11-15 夜、ユーザー指示）：
+   初級＝銅、中級＝銀、上級＝金、隠し＝ピンクブロンド、アプリ＝赤。
+   一覧の印と解除通知（ノッチ）の両方で使う */
+.tier-bronze { color: #b87333; }
+.tier-silver { color: #9aa1a9; }
+.tier-gold { color: #d4a017; }
+.tier-pink { color: #e5a58e; }
+.tier-red { color: #cf3a26; }
+.ach-row .ach-mark svg { width: 21px; height: 21px; fill: currentColor; display: block; margin: 2px auto 0; }
+.ach-island-icon svg { width: 15px; height: 15px; fill: currentColor; display: block; }
+/* 実績の分類タブ（2026-11-15 夜、ユーザー指示）：横一列に並べ、
+   選んだ分類だけを下に出す。選んだタブは段階色で塗る */
+.ach-tabs { display: flex; gap: 6px; margin: 2px 0 12px; }
+.ach-tab {
+  flex: 1; padding: 7px 0; border: 1px solid #ddd6c4; background: transparent;
+  border-radius: 999px; font-size: 13px; font-weight: 700; color: #8a8578;
+  cursor: pointer; font-family: inherit;
+}
+.ach-tab.tier-bronze.active { background: #b87333; border-color: #b87333; color: #fff; }
+.ach-tab.tier-silver.active { background: #9aa1a9; border-color: #9aa1a9; color: #fff; }
+.ach-tab.tier-gold.active { background: #d4a017; border-color: #d4a017; color: #3d2c00; }
+.ach-tab.tier-pink.active { background: #e5a58e; border-color: #e5a58e; color: #4a2c1a; }
+.ach-tab.tier-red.active { background: #cf3a26; border-color: #cf3a26; color: #fff; }
 .ach-row:not(.done) { opacity: .55; }
 /* 実績の表示はノッチ（黒い部分）に出す（2026-11-14 ユーザー指示）。
    ノッチと同じ色・寸法で重ね、名前が長いときだけ横に広がるので、
@@ -846,6 +988,65 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   animation: achIslandIn .25s ease-out;
 }
 .ach-island[hidden] { display: none; }
+/* ノッチの常駐表示：クリア条件を常に出す。実績が解除された間は
+   上の .ach-island が同じ場所・同じ見た目で一時的に覆う */
+.notch-label {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  box-sizing: border-box; z-index: 47;
+  display: flex; align-items: center; justify-content: center;
+  min-width: var(--notch-w); min-height: var(--notch-h);
+  padding: 5px calc(var(--notch-w) * 0.08) 7px;
+  background: #191921; color: #fff;
+  border-radius: 0 0 16px 16px;
+  /* 文字も盤面に比例させる（2026-11-15 夜、ユーザー指示）：
+     固定 12px だと、小さく描かれる環境（背の低い窓など）で
+     ラベルがノッチより幅広くなってはみ出していた。基準サイズ
+     （ノッチ幅 200）で 12px になる比率 */
+  font-size: calc(var(--notch-w) * 0.06); font-weight: 700; white-space: nowrap;
+  pointer-events: none;
+}
+
+/* 「合体数3」の文字の代わりに置く汎用アイコンの小さいタイル
+   （2026-11-15 夜、ユーザー指示）：灰色・矢印なし・目は真ん中。
+   数のバッジは本物と同じ青（数3の色）で「3」。大きさは置かれる
+   場所の文字サイズ（em）に追随する */
+.mini-generic {
+  position: relative; display: inline-block; flex: none;
+  width: 1.85em; height: 1.85em; border-radius: 24%;
+  background: linear-gradient(160deg, color-mix(in srgb, #8a8a91 82%, #fff), #8a8a91 55%, color-mix(in srgb, #8a8a91 78%, #000));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .25), 0 1px 3px rgba(0, 0, 0, .25);
+  vertical-align: -.55em; margin-right: .16em;
+}
+.mini-generic .mini-eyes {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center; gap: .37em;
+}
+.mini-generic .mini-eyes i {
+  width: .12em; height: .17em; background: #fff; border-radius: 50%;
+}
+.mini-generic .mini-badge-num {
+  /* 数字の見た目の中心を円の中心に合わせる（実測で補正：
+     文字は箱ごと中心に置かれるが、数字の絵は箱の中で少し
+     下寄りに描かれるため、そのままだと右下にずれて見える） */
+  transform: translate(-.03em, -.07em);
+}
+.mini-generic .mini-badge.col1 { background: #2456d6; } /* 数3の青 */
+.mini-generic .mini-badge.col2 { background: #15803d; } /* 数4の緑 */
+.mini-generic .mini-badge {
+  position: absolute; top: -.72em; right: -.72em;
+  width: 1.89em; height: 1.89em; border-radius: 50%;
+  background: #2456d6; color: #fff;
+  display: grid; place-items: center;
+  /* 黒い部分では数字が小さくて見づらいため、元のバッジを
+     そのまま拡大する（font-size だけを .36em から .65em に
+     上げ、箱・数字・位置の比率は元のまま。2026-11-15 夜、
+     ユーザー指示） */
+  font-size: .65em; font-weight: 800; line-height: 1;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, .25);
+}
+/* ⑧の間はノッチのクリア条件を暗がりの上に出して注目させる */
+.phone.tut-goal2 #notchLabel { z-index: 49; }
+.phone.tut-goal2 #tutCaption { z-index: 50; }
 .ach-island-icon { font-size: 15px; line-height: 1; }
 .ach-island-name { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
 @keyframes achIslandIn {
@@ -941,6 +1142,12 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 #moodDim[hidden] { display: none; }
 .phone.mood-spotting .board-wrap { position: relative; z-index: 49; }
+/* 注目の間にドックのアプリを開いたら、開いたシートが前に来る
+   ようにする（2026-11-15 夜、ユーザー指示）：シートが開いている
+   間だけ、暗がりと盤面の持ち上げを下げる。シートを閉じれば
+   注目が戻り、終わりの処理（カード）へ進む */
+.phone.mood-spotting:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) .board-wrap { z-index: auto; }
+.phone.mood-spotting:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) #moodDim { visibility: hidden; }
 /* 対象以外のタイルはタイルごとに暗くする（対象には何も
    しないので相対的に目立つ。複製は置かない） */
 #board.mood-dimming .icon-stack:not(.mood-target) .app-icon::after {
