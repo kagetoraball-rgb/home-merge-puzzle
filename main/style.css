@@ -188,10 +188,12 @@ h1 {max-width:none;font-size:12px}
 }
 .planner {max-width:520px}
 .app-icon.gold {background:linear-gradient(150deg,#e6be6e,#b4863a)}
+.app-icon.teal {background:linear-gradient(150deg,#2dd4bf,#0d9488)}
 .app-icon.rose {background:linear-gradient(150deg,#dca1c1,#ad668f)}
 #board .cell.destination {box-shadow:none}
 #board .prediction-outline {position:absolute;inset:2px;border:2px dashed var(--prediction);z-index:4;pointer-events:none;border-radius:2px}
 .app-icon.cyan {background:linear-gradient(150deg,#79c5cb,#438c9d)}
+.app-icon.cream {background:linear-gradient(150deg,#f6ead0,#e2cb9e);color:#7a4a21}
 #board {position:relative;isolation:isolate}
 #board .cell {isolation:auto}
 #board .board-coin {position:absolute;width:82%;height:82%;z-index:1;pointer-events:none}
@@ -261,8 +263,13 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
      基準サイズ（盤面幅370）で従来どおり 200×36 になる比率。
      高さの上限は 2026-11-15 夜に廃止（画面が大きいときだけ
      ノッチが平たくなるのを防ぎ、比率を一定に保つため） */
-  --notch-w: calc(var(--board-w) * 0.54);
-  --notch-h: calc(var(--notch-w) * 0.18);
+  --notch-w: calc(var(--board-w) * 0.44); /* 一時停止ボタンが被らないよう両側から狭めた（GPT実装。2026-11-17ユーザー指示で採用） */
+  --notch-h: calc(var(--board-w) * 0.54 * 0.18); /* 高さは狭める前の横幅基準のまま（横幅だけ削る） */
+  --practice-height: 22px;
+  --practice-top: calc(var(--notch-h) + 3px);
+  /* ステータスバーと本体の上余白で43px。幅が広いときだけ盤面を下げる。 */
+  --board-top: max(43px, calc(var(--practice-top) + var(--practice-height) + 3px - var(--board-w) * .025));
+  --practice-offset: calc(var(--practice-top) - var(--board-top));
   box-sizing: border-box;
   width: calc(var(--board-w) + 20px);
   height: calc((var(--board-w) + 44px) * 17 / 9 - 24px);
@@ -288,11 +295,11 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 /* ステータスバー（スマホ風） */
 .statusbar {
   display: grid; grid-template-columns: 1fr var(--notch-w) 1fr; align-items: center;
-  padding: 2px 8px 9px 8px; font-size: 12.5px; font-weight: 700; color: var(--ink);
+  padding: 2px 8px calc(var(--board-top) - 34px); font-size: 12.5px; font-weight: 700; color: var(--ink);
   /* アプリ（シート）を開いてもステータスバーは隠れない（実機の
      スマホ準拠）。クリア演出（z-index 50）よりは下に置くので、
      画面が落ちる演出ではステータスバーも一緒に消える */
-  position: relative; z-index: 46;
+  position: relative; z-index: 49; pointer-events: none;
 }
 /* ノッチ（2026-11-14 ユーザーが実機の写真で指示）：時刻とバッテリーの
    間の黒い部分を広げ、実機のように画面の上端にくっつけて垂らす。
@@ -308,7 +315,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   position: absolute; left: 50%; top: -10px; transform: translateX(-50%);
   border-radius: 0 0 16px 16px;
 }
-.statusbar #clockText { grid-column: 1; justify-self: center; }
+.statusbar :is(#clockText, #titleClock) { grid-column: 1; justify-self: center; }
 .status-right { display: inline-flex; align-items: center; gap: 6px; grid-column: 3; justify-self: center; }
 /* 時刻とバッテリーの下の辺を、ノッチ（黒い部分）の底の線に揃える
    （2026-11-16 ユーザー選択「下の辺を底の線に揃える」。当初は
@@ -317,13 +324,49 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    バッテリー側の箱の高さは22px（半分11）なので、底をノッチの
    底（上端から notch-h）に合わせるには
    notch-h - 23 - 11 = notch-h - 34px だけずらす */
-.statusbar #clockText, .statusbar .status-right {
+.statusbar :is(#clockText, #titleClock), .statusbar .status-right {
   position: relative; top: calc(var(--notch-h) - 34px);
 }
 /* 時刻の箱は19pxとバッテリー側より3px低いので、底を揃える
    ずらし量は1.5px少なくて済む */
-.statusbar #clockText { top: calc(var(--notch-h) - 32.5px); }
-#clockText { font-weight: 700; }
+.statusbar :is(#clockText, #titleClock) { top: calc(var(--notch-h) - 32.5px); }
+:is(#clockText, #titleClock) { font-weight: 700; }
+/* ゲーム内の時刻は壁紙の明るさによらず常に白（2026-11-19 ユーザー指示）。
+   明るい壁紙でも読めるよう、暗い影だけ添える */
+#clockText { color: #fff; text-shadow: 0 1px 3px rgba(0,0,0,.45); }
+/* 一時停止ボタン（2026-11-16 GPT実装の復旧）：電池の左に置く
+   丸いボタン。中身は縦二本線 */
+.pause-btn {
+  width: 22px; height: 22px; border-radius: 50%; flex: none;
+  border: 1.5px solid currentColor; background: transparent; color: inherit;
+  display: inline-grid; place-items: center; cursor: pointer; padding: 0;
+  pointer-events: auto;
+}
+.pause-btn[hidden] { display: none; }
+.pause-btn span {
+  width: 6px; height: 8px; display: block;
+  border-left: 2.5px solid currentColor; border-right: 2.5px solid currentColor;
+}
+/* 一時停止メニュー：スマホの枠の中に暗転とカードを収める。
+   暗転は盤面だけに効かせ、ドックは一時停止中も使えるようにする
+   （2026-11-19 ユーザー指示）：暗転部分はクリックを素通しし、
+   カードだけが受ける。シート（z-index 40〜）より下に置くので、
+   ドックから開いた画面は一時停止の上に重なる */
+.pause-menu {
+  position: absolute; inset: 0; z-index: 39;
+  margin: 0; border: none; padding: 0;
+  background: rgba(12, 12, 16, .55); max-width: none; max-height: none;
+  pointer-events: none;
+}
+.pause-menu[open] { display: grid; place-items: center; }
+.pause-card { position: relative; width: 78%; max-width: 300px; pointer-events: auto; }
+.pause-card .confirm-title { text-align: center; }
+.pause-card .confirm-btns { flex-direction: column; }
+.pause-close {
+  position: absolute; top: 10px; right: 12px; width: 30px; height: 30px;
+  border: none; border-radius: 50%; background: #f2f1ec; color: var(--ink);
+  font-size: 16px; line-height: 1; cursor: pointer; padding: 0;
+}
 #statusText { color: #bd725b; }
 .battery { display: inline-flex; align-items: center; gap: 1.5px; }
 /* ラン中でないページに出し続ける充電中の⚡（2026-11-15 夜）。
@@ -565,7 +608,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 .icon-stack.charging .app-icon {
   transform-origin: 50% 100%;
-  animation: warp-charge 1s ease-in forwards;
+  animation: warp-charge .5s ease-in forwards;
 }
 @keyframes warp-charge {
   0% { transform: scale(1, 1) translateY(0); }
@@ -675,12 +718,42 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    なし。盤面だけにグレーの覆いをかけ（ドックには影を落とさない）、
    文言と大きなリセットのマークだけを置く */
 .lose-panel {
-  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  width: var(--board-w); aspect-ratio: 4 / 6; z-index: 40;
+  position: absolute; top: var(--practice-offset); left: 50%; transform: translateX(-50%);
+  width: var(--board-w); height: calc(var(--board-w) * 1.5 - var(--practice-offset)); z-index: 40;
+  clip-path: inset(0 round 10px);
   background: rgba(24, 24, 30, .48); border-radius: 10px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
 }
 .lose-panel[hidden] { display: none; }
+.lose-panel.practice-transition { transition: transform .22s ease, clip-path .22s ease; }
+.lose-panel.practice-off {
+  /* 下端をボタンの下端に置き、画面上端からそこまで覆いを残す。 */
+  transform: translate(-50%, calc(var(--practice-height) - 100%));
+  clip-path: inset(calc(100% - var(--practice-top) - var(--practice-height)) 0 0);
+  pointer-events: none;
+}
+.lose-panel.practice-off > * { visibility: hidden; }
+/* 試し操作の切り替え（覆いの上端中央）。シート表示中は隠す（記録11） */
+.practice-toggle {
+  position: absolute; top: var(--practice-offset); left: 50%; transform: translateX(-50%);
+  z-index: 41; width: 36px; height: var(--practice-height); border-radius: 999px;
+  border: 1.5px solid rgba(255, 255, 255, .65);
+  background: rgba(20, 20, 26, .45); color: #fff;
+  display: grid; place-items: center; cursor: pointer; padding: 0;
+}
+.practice-toggle[hidden] { display: none; }
+.practice-toggle svg {
+  width: 16px; height: 16px; fill: none; stroke: currentColor;
+  stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round;
+  transition: transform .18s;
+}
+.practice-toggle.flipped svg { transform: rotate(180deg); }
+.phone:has(.settings-sheet:not([hidden]), .search-sheet:not([hidden]), .wallpaper-sheet:not([hidden]), .sound-sheet:not([hidden]), .store-sheet:not([hidden]), .trophy-sheet:not([hidden])) #practiceToggle { display: none; }
+/* リセットボタンの中のチャレンジ開始矢印は、待機中のチャレンジ
+   のときだけ出す（開始分離の配線で切り替える。それまでは隠す） */
+.lose-reset .challenge-start-arrow { display: none; }
+.lose-reset.challenge-start .challenge-start-arrow { display: block; }
+.lose-reset.challenge-start svg path:not(.challenge-start-arrow) { display: none; }
 /* 終了画面のステージ選択（2026-11-16）：結果表記の上に、今の
    ステージ名と∨を出し、∨を押すと選択肢が追加の枠で開く
    （1ページ目だけ） */
@@ -743,19 +816,23 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    止まっているときは今まで通りはみ出して見える */
 .page-slide-viewport {
   flex: none; width: var(--board-w); aspect-ratio: 4 / 6;
-  overflow: hidden; position: relative;
+  position: relative; clip-path: inset(min(0px, var(--practice-offset)) 0 0);
 }
+.page-slide-viewport.practice-slide { clip-path: inset(calc(-1 * var(--board-top)) 0 0); }
+.page-sliding > :is(#losePanel, #practiceToggle) { visibility: hidden; }
 .page-slide-track { display: flex; height: 100%; will-change: transform; }
 .page-slide-slot { flex: none; position: relative; height: 100%; }
 .page-slide-slot > #board { width: 100%; height: 100%; }
 .board-clone {
   display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(6, 1fr);
-  gap: 1px; width: 100%; height: 100%; position: relative; background: transparent;
+  gap: var(--slide-grid-gap); width: 100%; height: 100%; position: relative; background: transparent;
 }
 .page-slide-veil {
-  inset: 0; left: 0; transform: none; width: 100%; height: 100%;
-  aspect-ratio: auto; pointer-events: none;
+  left: 0; transform: none; width: 100%;
+  height: calc(100% - var(--practice-offset)); pointer-events: none;
 }
+
+.page-slide-veil.practice-off { transform: translateY(calc(var(--practice-height) - 100%)); }
 
 /* 確認シート（盤面リセット・初期化の警告） */
 .confirm-sheet {
@@ -974,14 +1051,13 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 .ach-tab.tier-red.active { background: #cf3a26; border-color: #cf3a26; color: #fff; }
 .ach-row:not(.done) { opacity: .55; }
 /* 実績の表示はノッチ（黒い部分）に出す（2026-11-14 ユーザー指示）。
-   ノッチと同じ色・寸法で重ね、名前が長いときだけ横に広がるので、
-   盤面には一切被らない */
+   通知中もノッチの外形は揃え、長い実績名は省略する。 */
 .ach-island {
   position: absolute; top: 0; left: 50%; transform: translateX(-50%);
   box-sizing: border-box;
   z-index: 56; display: flex; align-items: center; justify-content: center; gap: 7px;
-  min-width: var(--notch-w); max-width: calc(var(--notch-w) * 1.65); min-height: var(--notch-h);
-  padding: 5px 16px 7px;
+  width: var(--notch-w); height: var(--notch-h);
+  padding: 0 6px; overflow: hidden;
   background: #191921; color: #fff;
   border-radius: 0 0 16px 16px;
   pointer-events: none; white-space: nowrap;
@@ -992,10 +1068,10 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    上の .ach-island が同じ場所・同じ見た目で一時的に覆う */
 .notch-label {
   position: absolute; top: 0; left: 50%; transform: translateX(-50%);
-  box-sizing: border-box; z-index: 47;
+  box-sizing: border-box; z-index: 50;
   display: flex; align-items: center; justify-content: center;
-  min-width: var(--notch-w); min-height: var(--notch-h);
-  padding: 5px calc(var(--notch-w) * 0.08) 7px;
+  width: var(--notch-w); height: var(--notch-h);
+  padding: 0 4px;
   background: #191921; color: #fff;
   border-radius: 0 0 16px 16px;
   /* 文字も盤面に比例させる（2026-11-15 夜、ユーザー指示）：
@@ -1005,6 +1081,13 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   font-size: calc(var(--notch-w) * 0.06); font-weight: 700; white-space: nowrap;
   pointer-events: none;
 }
+
+/* ステータスバーを暗転より前に出す作りにしたため（記録6）、
+   ラベルも暗転より上に出る。流れの暗がりと機嫌の注目の間は、
+   以前覆いの下で暗く見えていた分だけ落とす。⑧（クリア条件の
+   注目、tut-goal2）の間は落とさない */
+.phone.tut-shading .notch-label, .phone.tut-goal .notch-label,
+.phone:has(#moodDim:not([hidden])) .notch-label { filter: brightness(.55); }
 
 /* 「合体数3」の文字の代わりに置く汎用アイコンの小さいタイル
    （2026-11-15 夜、ユーザー指示）：灰色・矢印なし・目は真ん中。
@@ -1046,7 +1129,7 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 /* ⑧の間はノッチのクリア条件を暗がりの上に出して注目させる */
 .phone.tut-goal2 #notchLabel { z-index: 49; }
-.phone.tut-goal2 #tutCaption { z-index: 50; }
+.phone.tut-goal2 #tutCard { z-index: 50; }
 .ach-island-icon { font-size: 15px; line-height: 1; }
 .ach-island-name { font-size: 14px; font-weight: 700; overflow: hidden; text-overflow: ellipsis; }
 @keyframes achIslandIn {
@@ -1055,6 +1138,34 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 .store-coins { font-size: 16px; font-weight: 700; color: var(--ink); margin: 0 2px 12px; }
 .store-note { font-size: 13px; color: var(--muted); line-height: 1.6; margin: 14px 2px 0; }
+.store-help {
+  margin-left: auto; width: 30px; height: 30px; border-radius: 50%;
+  border: 1.5px solid var(--line); background: #fff; color: var(--ink);
+  font-size: 15px; font-weight: 700; cursor: pointer; padding: 0;
+}
+.store-space-warning {
+  color: #c22f2f; font-size: 13px; font-weight: 700; margin: 2px 2px 10px;
+}
+.store-space-warning[hidden] { display: none; }
+.store-help-bag { font-size: 44px; line-height: 1; }
+.store-help-text p { margin: 0 0 10px; }
+.store-help-text p:last-child { margin-bottom: 0; }
+/* 購入可能の通知（ノッチ。実績の通知と同じ場所・同じ見た目） */
+.store-offer { gap: 3px; padding: 0 3px; }
+.store-offer-icons { display: inline-flex; align-items: center; gap: 2px; }
+.store-offer-icon {
+  width: calc(var(--notch-w) * .16);
+  height: calc(var(--notch-w) * .16);
+}
+.store-offer-icon .icon-stack .app-icon { width: 100%; height: 100%; animation: none; }
+.store-offer-text { font-size: calc(var(--notch-w) * .08); font-weight: 700; }
+@keyframes storeBounce {
+  0% { transform: translateY(0); }
+  35% { transform: translateY(-16%); }
+  70% { transform: translateY(0); }
+  100% { transform: translateY(0); }
+}
+.store-app.store-bounce { animation: storeBounce .6s ease; }
 .store-row { gap: 12px; flex-wrap: wrap; }
 /* 狭い画面では購入ボタンが幅を取り、説明文の欄が潰れて縦書き状に
    なるため、テキスト欄に下限幅を持たせ、収まらないときはボタンが
@@ -1108,19 +1219,157 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 #board.tut-dimming .cell.tut-dim .rebel-mark {
   filter: brightness(.5);
 }
-/* 導入フローの進行の一言：盤面の下部に出す帯 */
-#tutCaption {
+/* 導入フローの進行の一言：盤面の下部に出すカード（2026-11-19
+   ユーザー指示でカードパネル式に）。図＋案内文のカードで、
+   カードの間も盤面は動かせる（カード自体は操作を受けない）。
+   覆い（黒55%）の上では黒が埋もれるため、白いカード＋濃い文字 */
+#tutCard {
   position: absolute; z-index: 40; pointer-events: none;
-  /* width はパディング込みで効かせる（込みでないと帯が右にずれる） */
+  /* width はパディング込みで効かせる（込みでないと右にずれる） */
   box-sizing: border-box;
-  /* 覆い（黒55%）の上では黒い帯が埋もれるため、白い帯＋濃い文字に
-     する（2026-11-14 ユーザー選択） */
   background: #fff; color: #23232c;
-  border-radius: 14px; padding: 9px 14px;
-  font-size: 20px; font-weight: 700; line-height: 1.5; text-align: center;
-  white-space: pre-line;
+  border-radius: 16px; padding: 10px 14px 12px;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
 }
+#tutCaption {
+  font-size: 20px; font-weight: 700; line-height: 1.5; text-align: center;
+  white-space: pre-line;
+}
+.tut-diagram {
+  display: flex; align-items: center; justify-content: center;
+  min-height: 48px; margin-bottom: 8px;
+}
+.tut-thumb { width: 48px; height: 48px; container-type: size; flex: none; }
+.tut-stage { position: relative; height: 48px; flex: none; }
+.tut-slots { display: flex; gap: 10px; }
+.tut-slots span {
+  width: 48px; height: 48px; border-radius: 12px; flex: none;
+  background: rgba(28, 28, 40, .06);
+}
+.tut-actor { position: absolute; top: 0; left: 0; width: 48px; height: 48px; }
+.tut-face { position: absolute; inset: 0; display: block; }
+.tut-anim-swap-a { animation: tut-swap-a 3s ease-in-out infinite; }
+.tut-anim-swap-b { animation: tut-swap-b 3s ease-in-out infinite; }
+.tut-anim-sleep-out { animation: tut-sleep-out 3s ease-in-out infinite; }
+.tut-anim-sleep-in { opacity: 0; animation: tut-sleep-in 3s ease-in-out infinite; }
+.tut-anim-merge-a { animation: tut-merge-a 3s ease-in-out infinite; }
+.tut-anim-face-out { animation: tut-face-out 3s ease-in-out infinite; }
+.tut-anim-face-in { opacity: 0; animation: tut-face-in 3s ease-in-out infinite; }
+.tut-anim-slide2 { animation: tut-slide2 3s ease-in-out infinite; }
+.tut-badge-pulse .fuse { animation: tut-fuse-pulse 3s ease-in-out infinite; }
+.tut-glow .app-icon { animation: tut-glow-icon 3s ease-in-out infinite; }
+.tut-ring .app-icon { animation: tut-ring-icon 3s ease-in-out infinite; }
+@keyframes tut-swap-a {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { transform: translateX(0); opacity: 1; }
+  28% { transform: translateX(0); opacity: 1; }
+  50% { transform: translateX(58px); opacity: 1; }
+  86% { transform: translateX(58px); opacity: 1; }
+  94% { transform: translateX(58px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 0; }
+}
+@keyframes tut-swap-b {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { transform: translateX(0); opacity: 1; }
+  28% { transform: translateX(0); opacity: 1; }
+  50% { transform: translateX(-58px); opacity: 1; }
+  86% { transform: translateX(-58px); opacity: 1; }
+  94% { transform: translateX(-58px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 0; }
+}
+@keyframes tut-sleep-out {
+  0%, 24% { opacity: 1; }
+  38%, 72% { opacity: 0; }
+  88%, 100% { opacity: 1; }
+}
+@keyframes tut-sleep-in {
+  0%, 24% { opacity: 0; }
+  38%, 72% { opacity: 1; }
+  88%, 100% { opacity: 0; }
+}
+@keyframes tut-merge-a {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { transform: translateX(0); opacity: 1; }
+  28% { transform: translateX(0); opacity: 1; }
+  48% { transform: translateX(58px); opacity: 1; }
+  58%, 94% { transform: translateX(58px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 0; }
+}
+@keyframes tut-face-out {
+  0%, 48% { opacity: 1; }
+  58%, 100% { opacity: 0; }
+}
+@keyframes tut-face-in {
+  0%, 48% { opacity: 0; transform: scale(.55); }
+  58% { opacity: 1; transform: scale(1.12); }
+  64% { transform: scale(1); }
+  100% { opacity: 1; transform: scale(1); }
+}
+@keyframes tut-slide2 {
+  0% { transform: translateX(0); opacity: 0; }
+  6% { transform: translateX(0); opacity: 1; }
+  24% { transform: translateX(0); opacity: 1; }
+  56% { transform: translateX(116px); opacity: 1; }
+  86% { transform: translateX(116px); opacity: 1; }
+  94% { transform: translateX(116px); opacity: 0; }
+  100% { transform: translateX(0); opacity: 0; }
+}
+@keyframes tut-fuse-pulse {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.35); }
+  55% { transform: scale(1); }
+}
+@keyframes tut-glow-icon {
+  0%, 54% { box-shadow: 0 0 0 0 rgba(245, 176, 0, 0); }
+  64%, 84% { box-shadow: 0 0 0 3px rgba(245, 176, 0, .95); }
+  96%, 100% { box-shadow: 0 0 0 0 rgba(245, 176, 0, 0); }
+}
+@keyframes tut-ring-icon {
+  0%, 58% { box-shadow: 0 0 0 0 rgba(36, 86, 214, 0); }
+  68% { box-shadow: 0 0 0 4px rgba(36, 86, 214, .55); }
+  86%, 100% { box-shadow: 0 0 0 9px rgba(36, 86, 214, 0); }
+}
+/* ⑦の図：電池が減る＋盤面が埋まる */
+.tut-goal-fig { display: flex; align-items: center; gap: 18px; }
+.tut-batt {
+  width: 56px; height: 28px; box-sizing: border-box; padding: 2px;
+  border: 3px solid #8e8e93; border-radius: 8px; position: relative; flex: none;
+}
+.tut-batt::after {
+  content: ''; position: absolute; right: -9px; top: 50%;
+  transform: translateY(-50%); width: 4px; height: 10px;
+  border-radius: 2px; background: #8e8e93;
+}
+.tut-batt-fill {
+  height: 100%; border-radius: 3px; background: #34c759;
+  animation: tut-batt-drain 3s ease-in-out infinite;
+}
+@keyframes tut-batt-drain {
+  0% { width: 92%; background: #34c759; }
+  48%, 82% { width: 8%; background: #e5484d; }
+  100% { width: 92%; background: #34c759; }
+}
+.tut-fillgrid { display: grid; grid-template-columns: repeat(4, 14px); gap: 3px; }
+.tut-fillgrid span {
+  width: 14px; height: 14px; border-radius: 4px; opacity: .15;
+  animation: tut-cell-fill 3s linear infinite;
+}
+.tut-fillgrid span:nth-child(4n+1) { background: #7862d9; }
+.tut-fillgrid span:nth-child(4n+2) { background: #e98a52; }
+.tut-fillgrid span:nth-child(4n+3) { background: #7b9b65; }
+.tut-fillgrid span:nth-child(4n) { background: #5598c4; }
+@keyframes tut-cell-fill {
+  0% { opacity: .15; }
+  10%, 84% { opacity: 1; }
+  96%, 100% { opacity: .15; }
+}
+/* 移動範囲の表示（設定でオン）：ドラッグ中、届くマスをその
+   アイコンの色で示す。他のアイコンに重なっても上に来る */
+.range-hint {
+  position: absolute; z-index: 49; pointer-events: none;
+  border-radius: 22%; transform: scale(.94);
+}
+
 /* 導入フローの誘導：スライドする白い矢印 */
 #tutArrow {
   position: fixed; z-index: 80; pointer-events: none;
@@ -1171,13 +1420,17 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 #tutShade {
   position: absolute; inset: 0; z-index: 48;
   background: rgba(16, 16, 24, .55);
+  pointer-events: none;
 }
 #tutShade[hidden] { display: none; }
 .phone.tut-shading .board-wrap { position: relative; z-index: 49; }
-/* 流れの最後の案内（⑦）の間：ステータスバーを暗がりの上に
+/* 電池を説明する⑦以外はステータスバーも覆いの下に置く。
+   覆いはタップを拾わないので一時停止はどの案内でも押せる。 */
+.phone:is(.tut-shading, .tut-goal2) .statusbar { z-index: 47; }
+/* 電池の案内（⑦）の間：ステータスバーを暗がりの上に
    出す（電池にも時刻にも何もしない。周りが暗いので相対的に
    目立つ）。案内文も上に残す（複製は置かない） */
-.phone.tut-goal #tutCaption { z-index: 50; }
+.phone.tut-goal #tutCard { z-index: 50; }
 .phone.tut-goal .statusbar { position: relative; z-index: 49; }
 
 /* ==== 機嫌の初回説明カード（2026-11-14） ====
@@ -1266,3 +1519,106 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   font-size: 14px; line-height: 1.65; color: #44434e;
   margin: 0 0 18px; text-align: center; white-space: pre-line;
 }
+
+/* タイトル画面 */
+@font-face {
+  font-family:"Pyoicon Title";
+  src:url("data:font/otf;base64,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") format("opentype");
+  font-weight:400;
+  font-display:swap;
+  unicode-range:U+3044,U+3053,U+3063,U+3068,U+3074,U+3087,U+3093,U+30A2,U+30A4,U+30B3,U+30BA,U+30D1,U+30EB,U+30F3;
+}
+
+.lock-screen {
+  position:absolute; inset:0; z-index:90; touch-action:none; cursor:pointer;
+  user-select:none; -webkit-user-select:none; color:white;
+  text-align:center; text-shadow:0 2px 8px var(--ink), 0 1px 3px var(--ink);
+}
+.lock-screen:focus-visible { outline:2px solid white; outline-offset:-5px; border-radius:inherit; }
+.lock-mark {
+  position:absolute; top:calc(var(--notch-h) + 11px); left:50%;
+  width:clamp(16px, calc(var(--board-w) * .053), 26px); height:auto;
+  transform:translateX(-50%); color:white;
+  filter:drop-shadow(0 1px 2px var(--ink)); pointer-events:none;
+}
+.lock-title {
+  position:absolute; inset:14% 0 auto; margin:0;
+  font:400 clamp(28px, calc(var(--board-w) * .24), 108px)/1 "Pyoicon Title", sans-serif;
+  color:white; text-align:center; white-space:nowrap; font-kerning:normal;
+  text-shadow:none;
+}
+.lock-title .title-main,
+.lock-title .title-subtitle { display:block; }
+.lock-title .title-subtitle { font-size:.55em; margin-top:.08em; }
+.lock-title .title-pa,
+.lock-title .title-pi,
+.lock-title .title-yo { position:relative; display:inline-block; }
+.lock-title .title-pi { margin-inline-end:-.19em; }
+/* Repeat the rounded-square mark across the title. */
+.lock-title .title-period {
+  position:relative; display:inline-block; width:.32em; color:transparent;
+}
+.lock-title .title-period::before,
+.lock-title .title-pa::before,
+.lock-title .title-pi::before {
+  content:""; position:absolute; pointer-events:none;
+  box-sizing:border-box; left:.622em; top:.148em;
+  width:.211em; height:.215em;
+  border:.06em solid white; border-radius:.058em;
+}
+.lock-title .title-pi::before { background:var(--purple); }
+.lock-title .title-pa::before { background:var(--green); }
+.lock-title .title-period::before { left:.05em; top:.613em; background:var(--blue); }
+.lock-title .title-yo-baseline {
+  display: inline-block;
+  position: relative;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+}
+.lock-title .title-yo-baseline svg {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 1em;
+  height: .82em;
+  z-index: -1;
+  pointer-events: none;
+  fill: var(--orange);
+}
+.lock-title,.unlock-hint { transition:transform 240ms ease, opacity 240ms ease; }
+.unlock-hint { position:absolute; inset:auto 0 12px; }
+.unlock-hint p { margin:0 0 9px; font-size:12px; font-weight:700; }
+.home-indicator { display:block; width:27%; height:4px; margin:auto; border-radius:4px; background:white; }
+.pattern {
+  position:absolute; top:52%; left:50%; width:72%; aspect-ratio:1;
+  transform:translate(-50%,-38%); opacity:0; pointer-events:none;
+  transition:transform 240ms ease, opacity 240ms ease;
+}
+.pattern > svg { position:relative; z-index:0; display:block; width:100%; height:100%; overflow:visible; }
+.pattern-dot { fill:white; opacity:.6; stroke:var(--ink); stroke-width:1; transition:opacity 100ms; }
+.pattern-dot.lit { opacity:1; animation:dot-contact 180ms ease-out; }
+@keyframes dot-contact { 35% { r:7px; } }
+.trace.live { stroke-opacity:.72; }
+.trace { fill:none; stroke:white; stroke-width:3.6; stroke-linecap:round; filter:drop-shadow(0 1px 2px var(--ink)); }
+.runners { position:absolute; inset:0; z-index:1; pointer-events:none; }
+.runner {
+  position:absolute; width:clamp(34px,calc(var(--board-w) * .13),52px);
+  aspect-ratio:1; container-type:size; translate:-50% -50%;
+}
+.runner .icon-stack .app-icon .eye { width:max(2px, 4.8cqw); height:max(3px, 7cqw); }
+.lock-screen.unlocking .lock-title { transform:translateY(-14px); opacity:.45; }
+.lock-screen.unlocking .unlock-hint { opacity:0; }
+.lock-screen.unlocking .pattern { opacity:1; transform:translate(-50%,-50%); }
+.lock-screen.unlocked .pattern { opacity:0; transform:translate(-50%,-70%); }
+.unlock-message { position:absolute; bottom:18%; inset-inline:0; margin:0; font-weight:700; }
+@media (prefers-reduced-motion: reduce) {
+  .lock-title,.unlock-hint,.pattern,.pattern-dot { transition:none; }
+  .pattern-dot.lit { animation:none; }
+}
+
+.lock-screen { background: #252537 center / cover no-repeat; }
+.lock-screen[hidden] { display: none; }
+.lock-screen .statusbar { margin: 10px 10px 0; color: var(--ink); text-shadow: none; }
+.lock-screen .title-battery-fill { display: block; height: calc(100% - 3px); margin-top: 1.5px; background:#34c759; border-radius:2px; }
+.power-overlay.boot-to-title { z-index:91; }

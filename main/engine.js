@@ -31,8 +31,15 @@ const TYPES = {
   // スピン（2026-11-12、弱かったキシの代わりにユーザー発案で新設）：
   // Y字の3方向（左上・右上・下）に自分の数だけ直線移動でき、
   // 自分で動くたびにアイコンごと90度右回転して向きが変わる
-  spin:   { id: 'spin',   name: 'スピン', symbol: 'Y', dirs: [[-1, -1], [1, -1], [0, 1]], color: '#b4863a', colorName: 'gold', arrows: ['↖', '↗', '↓'], special: true },
+  spin:   { id: 'spin',   name: 'スピン', symbol: 'Y', dirs: [[-1, -1], [1, -1], [0, 1]], color: '#0d9488', colorName: 'teal', arrows: ['↖', '↗', '↓'], special: true },
   ou:     { id: 'ou',     name: 'オウ',   symbol: '♚', dirs: [[0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1]], color: '#ad668f', colorName: 'rose', arrows: ['↑', '↗', '→', '↘', '↓', '↙', '←', '↖'], special: true },
+  // 歩（2026-11-16 ユーザー発案で新設）：将棋の歩と同じく上へだけ
+  // 進める。盤面の上の2行（y<=1）に到達すると自動で裏返って
+  // 金の動き（上・左上・右上・左・右・下。下の斜めには行けない）
+  // になる（promoted フラグ。裏返ったら戻らない）。動ける距離は
+  // 他のアイコンと同じく自分の数だけ（重ねて数が増えると、その
+  // 方向へ距離が伸びる）
+  fu:     { id: 'fu',     name: '歩',     symbol: '↑', dirs: [[0, -1]], color: '#c9a86a', colorName: 'cream', arrows: ['↑'], special: true },
   warp:   { id: 'warp',   name: 'ワープ', symbol: '?', dirs: [], color: '#438c9d', colorName: 'cyan', arrows: ['?'], special: true },
 };
 const TYPE_IDS = Object.keys(TYPES);
@@ -40,8 +47,8 @@ const TYPE_IDS = Object.keys(TYPES);
 const NORMAL_TYPE_IDS = TYPE_IDS.filter(id => !TYPES[id].special);
 // ストアの品揃え（表示順）と価格（2026-11-15 ユーザー決定で
 // 16/32/64 から値下げ）
-const SPECIAL_IDS = ['warp', 'spin', 'ou'];
-const PRICES = { warp: 10, spin: 20, ou: 40 };
+const SPECIAL_IDS = ['warp', 'spin', 'fu', 'ou'];
+const PRICES = { warp: 10, spin: 20, fu: 25, ou: 40 };
 
 // 性格補正（2026-11-13 ユーザー決定。メイン版のみ）。
 // rebel / eager は目覚め時の機嫌抽選の確率、sleep は移動1マスごとに
@@ -56,6 +63,7 @@ const PRICES = { warp: 10, spin: 20, ou: 40 };
 // - オウ: やる気は標準（以前の ×2/3 案と 10% 固定は差し替え済み）、眠り −10ポイント＝70%
 const PERSONALITY = {
   tate:   { rebel: 0.05,  eager: 0.10,  sleep: 0.8 },
+  fu:     { rebel: 0.05,  eager: 0.10,  sleep: 0.8 }, // 歩は当面タテ・ヨコと同じ（2026-11-16 新設時の仮決め）
   yoko:   { rebel: 0.05,  eager: 0.10,  sleep: 0.8 },
   uyoku:  { rebel: 0.025, eager: 0.10,  sleep: 0.9 },
   sayoku: { rebel: 0.10,  eager: 0.10,  sleep: 0.7 },
@@ -110,6 +118,11 @@ function makeIcon(type, x, y, opts = {}) {
     mood: opts.mood ?? 'normal', // 'normal' | 'eager' | 'rebel'（睡眠は z>0 で表す）
     voided: opts.voided ?? false, // 旧仕様（反抗で数字が無効化された印）の名残。2026-11-15以降は常に false
     orient: opts.orient ?? 0, // スピンの向き（0..3、90度右回転の回数）。他種では未使用
+    promoted: opts.promoted ?? false, // 歩が裏返って金になったか。他種では未使用
+    // 歩が上の2行に「出現」した印（購入・設置・変換でいきなり上の2行に
+    // 現れた歩は、将棋と同じく自分で一度動くまで金にならない。
+    // 2026-11-19 ユーザー指示）。出現位置で自動で付く
+    zoneSpawn: opts.zoneSpawn ?? (type === 'fu' && y <= 1),
     spun: opts.spun ?? false, // スピンが一度でも回転したか（目の切り替えに使う）
     sleepProgress: opts.sleepProgress ?? 0, // 個別タイマーの進み（秒）。次の z 減少までの蓄積
     sleepMs: opts.sleepMs ?? 0, // 個別タイマーの進み（ミリ秒、アプリ側が実時間で加算）。次の z 減少までの蓄積
@@ -118,8 +131,11 @@ function makeIcon(type, x, y, opts = {}) {
 
 // アイコンの現在の移動方向。スピンだけは向き（orient）で回転する：
 // 基準はY字（左上・右上・下）で、90度右回転は (dx,dy) -> (-dy,dx)
+// 金の動き（将棋の金と同じ6方向：下の斜めには行けない）
+const GOLD_DIRS = [[0, -1], [1, -1], [-1, -1], [-1, 0], [1, 0], [0, 1]];
 function dirsOf(icon) {
   const base = TYPES[icon.type].dirs;
+  if (icon.type === 'fu') return icon.promoted ? GOLD_DIRS : base;
   if (icon.type !== 'spin') return base;
   const o = ((icon.orient ?? 0) % 4 + 4) % 4;
   let dirs = base;
@@ -199,6 +215,15 @@ function emptyCells(state) {
 // 読み順とは、左上を起点に、一番上の行を左から右へ、次にその下の行を
 // 左から右へ、と進む順序。ランダム要素はない。
 // emptyCells は行優先（y→x）で列挙するので、その先頭が該当マスになる。
+// インストールで出る種類の抽選（2026-11-16 GPT実装の復旧）：
+// 基本4種は各種2枠、購入済みの特殊は各種1枠（出現率は基本1種の
+// 半分）。購入した特殊もインストールで出るようになる
+function pickInstallType(state) {
+  const pool = [];
+  for (const t of NORMAL_TYPE_IDS) pool.push(t, t);
+  for (const t of SPECIAL_IDS) if (state.purchased && state.purchased[t]) pool.push(t);
+  return pool[Math.floor(state.rng() * pool.length)];
+}
 function installCell(state) {
   const empties = emptyCells(state);
   return empties.length > 0 ? empties[0] : null;
@@ -246,6 +271,15 @@ function unshareMain(work, mover, dir, cols, rows) {
   return true;
 }
 
+// 重ねられる（合体できる）相手か：同種・同数が原則。
+// 歩と金は同じ種類でも重ねられない（2026-11-19 ユーザー指示。
+// 成り状態が違う歩同士は、数が同じでも入れ替えになる）
+function canStack(mover, target) {
+  if (target.type !== mover.type || target.count !== mover.count) return false;
+  if (mover.type === 'fu' && !!mover.promoted !== !!target.promoted) return false;
+  return true;
+}
+
 // 盤面サイズを明示して1歩試す本体
 function tryStepOnBoard(work, mover, dir, board, isFinal, intent) {
   const cols = board ? board.cols : 4;
@@ -258,7 +292,7 @@ function tryStepOnBoard(work, mover, dir, board, isFinal, intent) {
     mover.x = nx; mover.y = ny;
     return { icons: work, resultId: mover.id, merged: false };
   }
-  if (target.type === mover.type && target.count === mover.count) {
+  if (canStack(mover, target)) {
     if (!isFinal) {
       // 通過: 一時的に同じマスに重なるが、最終位置では重ならない
       mover.x = nx; mover.y = ny;
@@ -465,7 +499,7 @@ function progressAfterMove(state, resultId, distance, wasEager, madeCount = null
   if (!(state.config.installIntervalSec > 0) && state.moves % state.config.installEvery === 0) {
     const cell = installCell(state);
     if (cell) {
-      const type = NORMAL_TYPE_IDS[Math.floor(state.rng() * NORMAL_TYPE_IDS.length)];
+      const type = pickInstallType(state);
       const icon = makeIcon(type, cell.x, cell.y);
       state.icons.push(icon);
       events.push({ kind: 'install', iconId: icon.id, type, x: cell.x, y: cell.y });
@@ -521,7 +555,7 @@ function tickInstall(state) {
     events.push({ kind: 'lost' });
     return { ok: true, events };
   }
-  const type = NORMAL_TYPE_IDS[Math.floor(state.rng() * NORMAL_TYPE_IDS.length)];
+  const type = pickInstallType(state);
   const icon = makeIcon(type, cell.x, cell.y);
   state.icons.push(icon);
   events.push({ kind: 'install', iconId: icon.id, type, x: cell.x, y: cell.y });
@@ -558,7 +592,9 @@ function reserveIconIds(ids) {
  * やる気の効果（2026-11-11 ユーザー指定で旧効果「移動しても眠らない」
  * から変更）: やる気アイコンの移動で位置が変わったアイコンは全部、
  * そのアイコンと同じ種類になる（最後に入れ替わった相手も含む。
- * 合体相手は位置が変わらないので対象外。個数・睡眠・機嫌は変わらない）。
+ * 合体相手は位置が変わらないので対象外。個数は変わらない）。
+ * 変換されたアイコンは通常状態に戻る（2026-11-19 ユーザー指示）:
+ * 機嫌は通常になり、眠っていても目覚める。
  * beforePos は移動前の id -> "x,y" の対応。
  */
 function convertDisplaced(state, beforePos, type, events) {
@@ -570,8 +606,33 @@ function convertDisplaced(state, beforePos, type, events) {
     if (TYPES[t.type].special) continue;
     events.push({ kind: 'converted', iconId: t.id, from: t.type, to: type });
     t.type = type;
+    // 変換されたアイコンは通常状態に戻る（機嫌は通常、眠りも解ける）
+    t.mood = 'normal';
+    t.z = 0;
+    t.sleepMs = 0;
+    t.sleepProgress = 0;
     if (type === 'spin') t.orient = 0; // 変換で生まれたスピンは初期の向き（Y字）
+    if (type === 'fu') { // 変換で生まれた歩は裏返っていない
+      t.promoted = false;
+      // 上の2行で生まれた歩は「出現」扱い：自分で動くまで金にならない
+      t.zoneSpawn = t.y <= 1;
+    }
     // 数は全アイコンが持つので、種類が変わっても数はそのまま
+  }
+}
+
+// 歩の裏返し：上の2行（y<=1）にいる歩は金になる（到達した
+// 移動・入れ替えなど、位置が決まった時点でそろえる）。
+// ただし上の2行に出現したばかりの歩（zoneSpawn）は、自分で
+// 一度動くまで裏返らない（将棋と同じ。将棋では敵陣に現れる
+// ことはないが、このゲームでは購入・設置・変換で現れる）。
+// 裏返ったら戻らない
+function promoteFuInPlace(state, events) {
+  for (const t of state.icons) {
+    if (t.type === 'fu' && !t.promoted && !t.zoneSpawn && t.y <= 1) {
+      t.promoted = true;
+      if (events) events.push({ kind: 'promoted', iconId: t.id });
+    }
   }
 }
 
@@ -610,6 +671,10 @@ function applyMove(state, iconId, dest) {
     events.push({ kind: 'coins', amount: gained, total: state.coins });
   }
   if (wasEager) convertDisplaced(state, beforePos, icon.type, events);
+  // 自分で動いた歩は「出現」扱いを終える（上の2行にいれば裏返る）
+  const movedFu = state.icons.find(i => i.id === iconId);
+  if (movedFu && movedFu.type === 'fu') movedFu.zoneSpawn = false;
+  promoteFuInPlace(state, events);
   const madeIcon = sim.merged ? state.icons.find(i => i.id === sim.resultId) : null;
   events.push(...progressAfterMove(state, sim.resultId, sim.steps, wasEager,
     madeIcon ? madeIcon.count : null));
@@ -619,10 +684,19 @@ function applyMove(state, iconId, dest) {
 /*
  * ワープの発動（2026-11-12）: 盤上の全マス（自分とドックの列以外）から
  * 1マスと居場所を交換する。相手が空きマスならそのまま移動する。
- * target を渡すとそのマスと交換する（やる気のとき、プレイヤーが選ぶ。
- * 変換はしない）。省略するとランダムに決まる。
- * 1手として数える。発動後の眠りは確率判定1回だけ（ワープの眠り確率で
- * 当たれば1z、外れれば眠らない）。入れ替わった相手は眠らない。
+ * target を渡すとそのマスと交換する（エンジン側の指定経路）。
+ * 省略するとランダムに決まる。
+ * やる気のときは他のアイコンと同じく、入れ替わって位置の変わった
+ * 相手がワープになる（変換）。
+ * 相手がワープで同数なら、入れ替わらず重なる（合体）。
+ * ワープの数はワープする回数（2026-11-19 ユーザー指示）：発動すると
+ * 数の回数だけ続けて交換する。全体で1手として数える。
+ * （target で行き先を指定する経路はエンジンに残るが、アプリでは
+ * 使わない：やる気でも通常時と同じくランダム発動。2026-11-19
+ * ユーザー指示で行き先を選ぶ方式は廃止）
+ * 眠りはワープした回数だけ判定する（通常の移動と同じく、回数分の
+ * 判定で当たった数だけ z が増える。上限3）。入れ替わった相手は
+ * 眠らない。途中でワープ同士の合体が起きたら、そこで終わる。
  */
 function applyWarpSwap(state, iconId, target) {
   if (state.status !== 'playing') return { ok: false, reason: 'ゲームは終了しています' };
@@ -630,35 +704,72 @@ function applyWarpSwap(state, iconId, target) {
   if (!icon) return { ok: false, reason: 'アイコンがありません' };
   if (icon.type !== 'warp') return { ok: false, reason: 'ワープではありません' };
   if (icon.z > 0) return { ok: false, reason: '睡眠中は発動できません' };
-  let dest = null;
   if (target) {
     if (!inside(state, target.x, target.y) || isReservedCell(target.x, target.y)) {
       return { ok: false, reason: 'そのマスへはワープできません' };
     }
     if (target.x === icon.x && target.y === icon.y) return { ok: false, reason: '自分のマスです' };
-    dest = { x: target.x, y: target.y };
-  } else {
-    // ランダムな移動先はアイコンのいるマスだけ（2026-11-12 ユーザー
-    // 指定で空きマスを候補から外した。必ず誰かと入れ替わる）。
-    // やる気で自分で選ぶ場合（上の target 経路）は空きマスも選べる
-    const cells = [];
-    for (let y = 0; y < state.rows; y++) for (let x = 0; x < state.cols; x++) {
-      if (isReservedCell(x, y)) continue;
-      if (x === icon.x && y === icon.y) continue;
-      if (!iconAt(state.icons, x, y)) continue;
-      cells.push({ x, y });
-    }
-    if (!cells.length) return { ok: false, reason: 'ワープ先がありません' };
-    dest = cells[Math.floor(state.rng() * cells.length)];
+  } else if (!state.icons.some(i => i.id !== icon.id)) {
+    return { ok: false, reason: 'ワープ先がありません' };
   }
   const wasEager = icon.mood === 'eager';
-  const partner = iconAt(state.icons, dest.x, dest.y);
-  const from = { x: icon.x, y: icon.y };
-  icon.x = dest.x; icon.y = dest.y;
-  if (partner) { partner.x = from.x; partner.y = from.y; }
-  const events = [{ kind: 'warp', iconId: icon.id, x: dest.x, y: dest.y, swappedWith: partner ? partner.id : null }];
-  events.push(...progressAfterMove(state, icon.id, 1, wasEager));
-  return { ok: true, x: dest.x, y: dest.y, swapped: !!partner, events };
+  // やる気の変換用に、発動前の位置を控える
+  const beforePos = wasEager
+    ? new Map(state.icons.map(i => [i.id, i.x + ',' + i.y])) : null;
+  const totalJumps = Math.max(1, icon.count); // ワープの数＝ワープする回数
+  const events = [];
+  let jumps = 0;
+  let anySwap = false;
+  let mergedPartner = null;
+  let firstDest = target ? { x: target.x, y: target.y } : null;
+  while (jumps < totalJumps) {
+    let dest = null;
+    if (firstDest) {
+      dest = firstDest;
+      firstDest = null;
+    } else {
+      // ランダムな移動先はアイコンのいるマスだけ（2026-11-12 ユーザー
+      // 指定で空きマスを候補から外した。必ず誰かと入れ替わる）。
+      // やる気で自分で選ぶ場合（最初の1回）は空きマスも選べる
+      const cells = [];
+      for (let y = 0; y < state.rows; y++) for (let x = 0; x < state.cols; x++) {
+        if (isReservedCell(x, y)) continue;
+        if (x === icon.x && y === icon.y) continue;
+        if (!iconAt(state.icons, x, y)) continue;
+        cells.push({ x, y });
+      }
+      if (!cells.length) break; // 交換相手がいなければそこで終わる
+      dest = cells[Math.floor(state.rng() * cells.length)];
+    }
+    const partner = iconAt(state.icons, dest.x, dest.y);
+    jumps += 1;
+    // ワープ同士で同数なら、入れ替わらず重なる（合体する。
+    // 2026-11-19 ユーザー指示）。通常の合体と同じく、相手側が
+    // 残って数が1増え、コインは「できた数」だけ増える
+    if (partner && partner.type === 'warp' && partner.count === icon.count) {
+      partner.count += 1;
+      state.icons = state.icons.filter(i => i.id !== icon.id);
+      state.coins += partner.count;
+      events.push({ kind: 'warp', iconId: icon.id, x: dest.x, y: dest.y, swappedWith: partner.id, merged: true });
+      events.push({ kind: 'coins', amount: partner.count, total: state.coins });
+      mergedPartner = partner;
+      break;
+    }
+    const from = { x: icon.x, y: icon.y };
+    icon.x = dest.x; icon.y = dest.y;
+    if (partner) { partner.x = from.x; partner.y = from.y; anySwap = true; }
+    events.push({ kind: 'warp', iconId: icon.id, x: dest.x, y: dest.y, swappedWith: partner ? partner.id : null });
+    promoteFuInPlace(state, events);
+  }
+  if (jumps === 0) return { ok: false, reason: 'ワープ先がありません' };
+  // やる気なら、他のアイコンと同じく位置の変わった相手を変換する
+  if (wasEager) convertDisplaced(state, beforePos, 'warp', events);
+  if (mergedPartner) {
+    events.push(...progressAfterMove(state, mergedPartner.id, jumps, wasEager, mergedPartner.count));
+    return { ok: true, x: mergedPartner.x, y: mergedPartner.y, swapped: false, merged: true, jumps, events };
+  }
+  events.push(...progressAfterMove(state, icon.id, jumps, wasEager));
+  return { ok: true, x: icon.x, y: icon.y, swapped: anySwap, jumps, events };
 }
 
 /*
@@ -679,7 +790,9 @@ function buySpecial(state, typeId) {
   state.purchased[typeId] = true;
   const icon = makeIcon(typeId, cell.x, cell.y);
   state.icons.push(icon);
-  return { ok: true, iconId: icon.id, x: cell.x, y: cell.y, events: [{ kind: 'buy', iconId: icon.id, type: typeId, x: cell.x, y: cell.y }] };
+  const events = [{ kind: 'buy', iconId: icon.id, type: typeId, x: cell.x, y: cell.y }];
+  promoteFuInPlace(state, events);
+  return { ok: true, iconId: icon.id, x: cell.x, y: cell.y, events };
 }
 
 /*
@@ -788,6 +901,9 @@ function applyRebelMove(state, iconId) {
   icon.x = land.x; icon.y = land.y;
   // スピンの反抗移動も「自分で動いた」ので90度右回転する
   if (icon.type === 'spin') { icon.orient = ((icon.orient ?? 0) + 1) % 4; icon.spun = true; }
+  // 反抗の発動も「自分で動いた」ことになる（歩の出現扱いを終える）
+  if (icon.type === 'fu') icon.zoneSpawn = false;
+  promoteFuInPlace(state, events);
   events.push(...progressAfterMove(state, icon.id, land.dist, false, predation ? icon.count : null));
   return { ok: true, steps: land.dist, predation, x: land.x, y: land.y, events };
 }

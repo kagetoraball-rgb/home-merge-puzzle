@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>ホーム画面合体パズル（試作）</title>
+<title>ぴょいっとアイコンパズル。</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -13,6 +13,7 @@
     <span class="notch" aria-hidden="true"></span>
     <span class="status-right">
       <span id="statusText"></span>
+      <button id="pauseBtn" class="pause-btn" type="button" aria-label="一時停止" aria-haspopup="dialog" hidden><span aria-hidden="true"></span></button>
       <span class="battery" aria-hidden="true"><span class="battery-body"><span class="battery-gauge"><span id="batteryFill"></span></span><svg class="battery-bolt" id="batteryBolt" width="9" height="13" viewBox="0 0 10 14" hidden><polygon points="6.6,0 1,8 4.3,8 3.2,14 9,5.6 5.7,5.6" fill="#fff" stroke="rgba(0,0,0,.28)" stroke-width="0.7"/></svg></span><span class="battery-cap"></span></span>
     </span>
   </div>
@@ -24,12 +25,15 @@
     </div>
     <div class="dock"><div id="dock-grid"></div></div>
 
+    <button id="practiceToggle" class="practice-toggle" type="button" aria-controls="losePanel" aria-expanded="true" aria-label="盤面を試す" hidden>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 6 5 5 5-5"/></svg>
+    </button>
     <div class="lose-panel" id="losePanel" hidden>
       <div class="stage-select" id="stageSelect" hidden></div>
       <p class="lose-title">ゲームオーバー</p>
       <p class="lose-text">ホーム画面が一杯になりました。</p>
       <button id="loseResetBtn" class="lose-reset" type="button" aria-label="リセット">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.99 7.99 0 0 0 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17.65 6.35A7.99 7.99 0 0 0 12 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/><path class="challenge-start-arrow" d="M12 4l7 7h-4.5v8h-5v-8H5z"/></svg>
       </button>
     </div>
   </div>
@@ -42,6 +46,7 @@
     <div class="settings-list">
       <button id="soundBtn" class="settings-item" type="button">サウンド</button>
       <button id="wallpaperBtn" class="settings-item" type="button">壁紙の変更</button>
+      <button id="rangeHintBtn" class="settings-item" type="button">移動範囲の表示：オフ</button>
       <button id="initBtn" class="settings-item danger" type="button">初期化</button>
     </div>
     <input id="wallpaperInput" type="file" accept="image/*" hidden>
@@ -84,10 +89,11 @@
     <div class="settings-head">
       <button id="storeBack" class="settings-back" type="button">‹ 戻る</button>
       <span class="settings-title">ストア</span>
+      <button id="storeHelp" class="store-help" type="button" aria-label="ストアの使い方" aria-haspopup="dialog"><span aria-hidden="true">?</span></button>
     </div>
     <p class="store-coins">コイン：<span id="storeCoins">0</span>枚</p>
+    <p class="store-space-warning" id="storeSpaceWarning" hidden>購入すると空きマスがなくなります</p>
     <div class="settings-list" id="storeList"></div>
-    <p class="store-note">コインは、アイコンを合体させると「できた数」だけもらえます。コインと購入はこのラン限りです。買ったアイコンは、一番手前の空きマスに置かれます。</p>
   </div>
 
   <div class="search-sheet" id="searchSheet" hidden>
@@ -146,7 +152,20 @@
     <span class="ach-island-name" id="achToastName"></span>
   </div>
 
+  <div class="ach-island store-offer" id="storeOffer" role="status" hidden></div>
+
   <div class="notch-label" id="notchLabel" aria-label="合体数3を作ったらクリア"><span class="mini-generic"><span class="mini-eyes"><i></i><i></i></span><span class="mini-badge"><span class="mini-badge-num">3</span></span></span>を作ったらクリア</div>
+
+  <dialog id="pauseMenu" class="pause-menu" aria-labelledby="pauseTitle">
+    <div class="confirm-card pause-card">
+      <button id="pauseClose" class="pause-close" type="button" aria-label="閉じる">×</button>
+      <p id="pauseTitle" class="confirm-title">一時停止</p>
+      <div class="confirm-btns">
+        <button id="pauseResume" class="confirm-btn" type="button" autofocus>再開</button>
+        <button id="pauseEnd" class="confirm-btn" type="button">プレイ終了</button>
+      </div>
+    </div>
+  </dialog>
 
   <div class="power-overlay" id="powerOverlay" hidden>
     <div class="power-body">
@@ -187,6 +206,53 @@
       </div>
     </div>
   </div>
+  <div class="mood-sheet" id="storeHelpSheet" role="dialog" aria-modal="true" aria-labelledby="storeHelpTitle" aria-describedby="storeHelpText" hidden>
+    <div class="mood-card">
+      <div class="mood-diagram" aria-hidden="true"><span class="store-help-bag">🛍️</span></div>
+      <p class="mood-title" id="storeHelpTitle">ストアの使い方</p>
+      <div class="mood-text store-help-text" id="storeHelpText">
+        <p>合体すると、できた数だけ<br>コインがもらえる</p>
+        <p>コインで買った特殊アイコンは<br>手前の空きマスに置かれる</p>
+        <p>購入後はインストールでも出る。<br>出現率は基本アイコン1種の半分</p>
+        <p>コインと購入はこのプレイ限り</p>
+      </div>
+      <div class="confirm-btns">
+        <button id="storeHelpOk" class="confirm-btn" type="button">わかった</button>
+      </div>
+    </div>
+  </div>
+  <main class="lock-screen" id="lockScreen" role="button" tabindex="0"
+        aria-label="ぴょいっとアイコンパズル。上にスワイプ、またはタップでロックを解除">
+  <div class="statusbar">
+    <span class="status-left" id="titleClock">9:41</span>
+    <span class="notch" aria-hidden="true"></span>
+    <span class="status-right">
+      <span class="battery" aria-hidden="true"><span class="battery-body"><span class="battery-gauge"><span class="title-battery-fill" style="width: 100%"></span></span></span><span class="battery-cap"></span></span>
+    </span>
+  </div>
+    <svg class="lock-mark" viewBox="0 0 24 28" aria-hidden="true" focusable="false">
+      <path d="M6.5 10V7a5.5 5.5 0 0 1 11 0v3" fill="none" stroke="currentColor" stroke-width="2.6"/>
+      <path d="M3.5 11h17a2 2 0 0 1 2 2v3a10.5 10.5 0 0 1-21 0v-3a2 2 0 0 1 2-2Z" fill="currentColor"/>
+    </svg>
+    <h1 class="lock-title" aria-label="ぴょいっとアイコンパズル。">
+      <span class="title-main" aria-hidden="true"><span class="title-pi">ぴ</span><span class="title-yo"><span class="title-yo-baseline"><svg viewBox="0 -820 1000 820" aria-hidden="true" focusable="false"><rect x="85" y="-213" width="145" height="148" rx="19"/></svg></span>ょ</span>いっと</span>
+      <span class="title-subtitle" aria-hidden="true">アイコン<span class="title-pa">パ</span>ズル<span class="title-period">。</span></span>
+    </h1>
+    <div class="pattern" aria-hidden="true">
+      <svg viewBox="0 0 120 120">
+        <g id="traces"></g>
+        <g id="dots"></g>
+      </svg>
+      <div class="runners">
+<span class="runner" data-runner="tate" hidden><span class="icon-stack"><span class="app-icon purple tate"><span class="arrow"><svg viewBox="0 0 76 76"><path d="M38 16 V56"/><path d="M30 24 L38 16 L46 24"/><path d="M30 48 L38 56 L46 48"/></svg></span><span class="face"><i class="eye left"></i><i class="eye right"></i></span></span></span></span><span class="runner" data-runner="uyoku" hidden><span class="icon-stack"><span class="app-icon blue uyoku"><span class="arrow"><svg viewBox="0 0 76 76"><path d="M18 56 L58 16"/><path d="M46.7 16 H58 V27.3"/><path d="M18 44.7 V56 H29.3"/></svg></span><span class="face"><i class="eye right"></i></span></span></span></span><span class="runner" data-runner="yoko" hidden><span class="icon-stack"><span class="app-icon orange yoko"><span class="arrow"><svg viewBox="0 0 76 76"><path d="M18 36 H58"/><path d="M26 28 L18 36 L26 44"/><path d="M50 28 L58 36 L50 44"/></svg></span><span class="face"><i class="eye left"></i><i class="eye right"></i></span></span></span></span><span class="runner" data-runner="sayoku" hidden><span class="icon-stack"><span class="app-icon green sayoku"><span class="arrow"><svg viewBox="0 0 76 76"><path d="M58 56 L18 16"/><path d="M29.3 16 H18 V27.3"/><path d="M58 44.7 V56 H46.7"/></svg></span><span class="face"><i class="eye left"></i></span></span></span></span>
+      </div>
+    </div>
+    <div class="unlock-hint" aria-hidden="true">
+      <p>上にスワイプまたはタップ</p>
+      <span class="home-indicator"></span>
+    </div>
+    <p class="unlock-message" aria-live="polite"></p>
+  </main>
 </div>
 <script src="engine.js"></script>
 <script src="app.js"></script>
