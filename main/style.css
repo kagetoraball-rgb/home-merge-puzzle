@@ -731,6 +731,10 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   clip-path: inset(0 round 10px);
   background: rgba(24, 24, 30, .48); border-radius: 10px;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
+  /* 覆いの上で指を滑らせてもブラウザにスクロールの身振りとして
+     取り上げられないようにする。これが無いと、待機画面や終了画面で
+     ページ移動のスワイプが途中で打ち切られていた（2026-11-19 ユーザー指摘） */
+  touch-action: none;
 }
 .lose-panel[hidden] { display: none; }
 .lose-panel.practice-transition { transition: transform .22s ease, clip-path .22s ease; }
