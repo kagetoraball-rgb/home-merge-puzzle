@@ -354,6 +354,9 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    ドックから開いた画面は一時停止の上に重なる */
 .pause-menu {
   position: absolute; inset: 0; z-index: 39;
+  /* dialog の既定の作り（中身に合わせた幅・高さ）のままだと、
+     左に寄ってしまうため、枠いっぱいに広げる（2026-11-19 ユーザー指摘） */
+  width: 100%; height: 100%;
   margin: 0; border: none; padding: 0;
   background: rgba(12, 12, 16, .55); max-width: none; max-height: none;
   pointer-events: none;
@@ -1617,7 +1620,10 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   .pattern-dot.lit { animation:none; }
 }
 
-.lock-screen { background: #252537 center / cover no-repeat; }
+/* 最初の描画で黒く光らないように、既定の壁紙（プリズム）の
+   小さい版を CSS 側にも持たせる。本物の壁紙は app.js が
+   起動時に上から設定する（2026-11-19 ユーザー指摘） */
+.lock-screen { background: #252537 url("data:image/webp;base64,UklGRigBAABXRUJQVlA4IBwBAACwCACdASoYADUAPr1Kn0qnJCKhsBgN+OAXiWgAnTLxw9hACm2jRBARjOuGdWNxj8iv67RhzXxRPc9Mmsn732sMSR+Q5H7wykS2Jf4FCJAA/u1AQl7X5wYLjuBB6FvXmdHPVKXpyh69j12/IYrZaltNqNnriR7OkMQo4so+s0snz3xrLZvMDjMHAr4w+jHN2rlSFQpkn+g3CC+PfBo5fucvPbuSCBftdgxt83UF07fdpDrDaM15g0cS5aCGCVCuJVUbl/3fSPV7qVOk3fhX7MI9+nlPSKK+AuQXg/9h0qs2EsFQHsOvXYyN6wGaCq6wMdz+6WpYPDXJ4+HCa8K4qTexjlys8luRWNo9cHOTLtPMeg1n58jkUJ60wCAAAA==") center / cover no-repeat; }
 .lock-screen[hidden] { display: none; }
 .lock-screen .statusbar { margin: 10px 10px 0; color: var(--ink); text-shadow: none; }
 .lock-screen .title-battery-fill { display: block; height: calc(100% - 3px); margin-top: 1.5px; background:#34c759; border-radius:2px; }

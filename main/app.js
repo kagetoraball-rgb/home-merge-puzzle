@@ -937,6 +937,7 @@
   let drag = null; // { iconId, fromX, fromY, startX, startY, active, ghost, dests, target, targetKey, intent }
   let press = null; // タップ判定用: { pointerId, cell, handled }
   let pageSwipe = null; // ページ移動スワイプの候補: { pointerId, startX, startY }
+  let suppressPanelClick = false; // 覆いのボタンから始まったスワイプの、離したときのクリックを止める
   let tapSel = null; // タップ操作で選択中のアイコンID
   let warpDrag = null; // やる気ワープの行き先選びドラッグ { iconId, pointerId, startX, startY, active, ghost, hoverKey }
   let pendingAct = null; // 発動のタメ中 { iconId, kind: 'rebel'|'warp', pointerId, timer }
@@ -1548,6 +1549,14 @@
     if (currentPage().state.status === 'waiting') startWaitingPage();
     else resetCurrentPage();
   });
+  // 覆いのボタンから始まってスライドした指を離したときのクリックは、
+  // ボタンの誤作動になるのでここで止める（タップのクリックは通す）
+  losePanel.addEventListener('click', (e) => {
+    if (!suppressPanelClick) return;
+    suppressPanelClick = false;
+    e.stopPropagation();
+    e.preventDefault();
+  }, true);
 
   // ページの表示と切り替え。コース名のテキストは出さない
   // （2026-11-13 ユーザー指示）。ドットは実在するページの分だけ
@@ -1791,7 +1800,16 @@
     const sdy = e.clientY - pageSwipe.startY;
     if (!pageSlide) {
       if (Math.abs(sdx) >= 10 && Math.abs(sdx) > Math.abs(sdy)) {
-        if (engagePageSlide(sdx < 0 ? 1 : -1, e.pointerId)) press = null;
+        if (engagePageSlide(sdx < 0 ? 1 : -1, e.pointerId)) {
+          press = null;
+          if (pageSwipe.fromPanel) {
+            // 覆いのボタンから始まったスワイプ。ここでポインターを
+            // 捕捉し（描き直しで要素が消えても操作が切れない）、
+            // 離したときのクリックはボタンへ届けない
+            try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+            suppressPanelClick = true;
+          }
+        }
       }
       if (!pageSlide) return;
     }
@@ -2171,7 +2189,8 @@
       const across = Math.abs(dx * uy - dy * ux) / len; // レーンからのずれ（px）
       if (along <= 0) continue;
       if (!best || across < best.across || (across === best.across && along > best.along)) {
-        best = { ux: ux / len, uy: uy / len, along, across, max: maxDist * cell };
+        // 1マスの実距離は斜めでは cell×√2 になる（マス中心間の距離）
+        best = { ux: ux / len, uy: uy / len, along, across, max: maxDist * cell * len };
       }
     }
     if (!best) return { x: ox, y: oy };
@@ -2417,19 +2436,18 @@
     // 開くので、そちらは止まらない）
     if (pauseOpen) return;
     // 終了ページでは、覆いの上から始まった横スワイプでもページを
-    // めくれる（アイコンを持っていないときだけ。ボタン類（リセット
-    // ・ステージ選択）の上から始まった押下は除く：ポインターを
-    // 捕捉するとボタンのクリックが届かなくなるため）
+    // めくれる（アイコンを持っていないときだけ）。ボタン類（開始／
+    // リセット・ステージ選択）の上から始まったスワイプもめくれる
+    // （2026-11-19 ユーザー指摘：開始ボタンは盤面の真ん中に大きく、
+    // そこから滑らせても動かなかった）。捕捉はスライドが始まった
+    // 時点で行い、離したときのクリックはボタンへ届けない
+    suppressPanelClick = false;
     if (state.status !== 'playing' && !practiceOn) {
       if (!losePanel.hidden && e.isPrimary
         && !(e.pointerType === 'mouse' && e.button !== 0)
-        && losePanel.contains(e.target)
-        && !e.target.closest('#loseResetBtn, #stageSelect')) {
-        pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY };
+        && losePanel.contains(e.target)) {
+        pageSwipe = { pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, fromPanel: true };
         e.preventDefault();
-        // 盤面の描き直しで押したマスの要素が消えると操作が
-        // 取り消されてしまうため、ドラッグと同じく捕捉しておく
-        try { wrapEl.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
       }
       return;
     }
@@ -3089,6 +3107,7 @@
     if (typeof fetch !== 'function') return;
     let myLoad;
     myLoad = Promise.resolve(bgmEmbeddedBytes())
+      .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.arrayBuffer(); })
       .then(ab => decodeBgmData(ab))
       .then(buf => {
         if (bgmLoading === myLoad) bgmLoading = null;
