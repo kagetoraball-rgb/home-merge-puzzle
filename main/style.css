@@ -353,10 +353,15 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
    カードだけが受ける。シート（z-index 40〜）より下に置くので、
    ドックから開いた画面は一時停止の上に重なる */
 .pause-menu {
-  position: absolute; inset: 0; z-index: 39;
+  position: absolute; z-index: 39;
   /* dialog の既定の作り（中身に合わせた幅・高さ）のままだと、
-     左に寄ってしまうため、枠いっぱいに広げる（2026-11-19 ユーザー指摘） */
-  width: 100%; height: 100%;
+     左に寄ってしまうため、枠いっぱいに広げる（2026-11-19 ユーザー指摘）。
+     下端はドック（ページドットの帯＋ドック本体）の上までで止め、
+     暗転がドックに掛からないようにする（2026-11-19 ユーザー指摘。
+     帯30px＋ドックの余白・パディング等30px＋ドックのグリッド
+     （盤面幅の1/4）で、下からの距離は実測で一定だった） */
+  inset: 0 0 calc(var(--board-w) / 4 + 60px);
+  width: 100%; height: auto;
   margin: 0; border: none; padding: 0;
   background: rgba(12, 12, 16, .55); max-width: none; max-height: none;
   pointer-events: none;
