@@ -2287,7 +2287,9 @@
       const srcIcon = srcStack.querySelector('.app-icon');
       const iconRect = srcIcon.getBoundingClientRect();
       const clone = srcStack.cloneNode(true);
-      clone.style.transform = '';
+      // ドラッグ中と分かるように、持ったアイコンは少し大きくする
+      // （1.2倍は 2026-11-19 にユーザーが比較案から選択）
+      clone.style.transform = 'scale(1.2)';
       clone.style.transition = '';
       clone.style.width = stackRect.width + 'px';
       clone.style.height = stackRect.height + 'px';

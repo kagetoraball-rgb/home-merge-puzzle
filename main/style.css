@@ -349,8 +349,9 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 /* 一時停止の覆い：チュートリアルの暗がり（#tutShade）と同じ仕組み
    （2026-11-19 ユーザー指示）。暗がりは画面全体の一枚（#pauseShade）
-   で、ドックの下まで届く。盤面とドックの区分（.board-wrap）は
-   その上に出るので、ドックは暗くならず一時停止中も使える。
+   で、ドックの下まで届く。盤面のアイコンは覆いの下に入れて暗くし、
+   ドックだけを覆いの上に出すので、ドックは暗くならず一時停止中も
+   使える（持ち上げの指定はチュートリアルの節の後ろにある）。
    カードは暗がりの上に置き、クリックはカードだけが受ける。
    シート（z-index 40〜）より下に置くので、ドックから開いた画面は
    一時停止の上に重なる */
@@ -1441,9 +1442,11 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 #tutShade[hidden] { display: none; }
 .phone.tut-shading .board-wrap { position: relative; z-index: 49; }
 /* 一時停止中は、チュートリアルや機嫌の注目（上の49）よりこちらを
-   優先して区分を39にそろえる。一時停止のカード（39・後ろの要素
-   なので上に出る）が盤面の下に潜らず、必ず押せるようにするため */
-.phone.pausing .board-wrap { position: relative; z-index: 39; }
+   優先して区分の持ち上げを解く。盤面のアイコンは覆いの下に入れて
+   暗くし（2026-11-19 ユーザー指示）、ドックだけを覆いの上に出して
+   暗くせず使えるようにする。カード（39）は盤面より上に出る */
+.phone.pausing .board-wrap { position: relative; z-index: auto; }
+.phone.pausing .dock { position: relative; z-index: 39; }
 /* 電池を説明する⑦以外はステータスバーも覆いの下に置く。
    覆いはタップを拾わないので一時停止はどの案内でも押せる。 */
 .phone:is(.tut-shading, .tut-goal2) .statusbar { z-index: 47; }
