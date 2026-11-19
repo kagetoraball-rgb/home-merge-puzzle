@@ -347,26 +347,29 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   width: 6px; height: 8px; display: block;
   border-left: 2.5px solid currentColor; border-right: 2.5px solid currentColor;
 }
-/* 一時停止メニュー：スマホの枠の中に暗転とカードを収める。
-   暗転は盤面だけに効かせ、ドックは一時停止中も使えるようにする
-   （2026-11-19 ユーザー指示）：暗転部分はクリックを素通しし、
-   カードだけが受ける。シート（z-index 40〜）より下に置くので、
-   ドックから開いた画面は一時停止の上に重なる */
-.pause-menu {
-  position: absolute; z-index: 39;
-  /* dialog の既定の作り（中身に合わせた幅・高さ）のままだと、
-     左に寄ってしまうため、枠いっぱいに広げる（2026-11-19 ユーザー指摘）。
-     下端はドック（ページドットの帯＋ドック本体）の上までで止め、
-     暗転がドックに掛からないようにする（2026-11-19 ユーザー指摘。
-     帯30px＋ドックの余白・パディング等30px＋ドックのグリッド
-     （盤面幅の1/4）で、下からの距離は実測で一定だった） */
-  inset: 0 0 calc(var(--board-w) / 4 + 60px);
-  width: 100%; height: auto;
-  margin: 0; border: none; padding: 0;
-  background: rgba(12, 12, 16, .55); max-width: none; max-height: none;
+/* 一時停止の覆い：チュートリアルの暗がり（#tutShade）と同じ仕組み
+   （2026-11-19 ユーザー指示）。暗がりは画面全体の一枚（#pauseShade）
+   で、ドックの下まで届く。盤面とドックの区分（.board-wrap）は
+   その上に出るので、ドックは暗くならず一時停止中も使える。
+   カードは暗がりの上に置き、クリックはカードだけが受ける。
+   シート（z-index 40〜）より下に置くので、ドックから開いた画面は
+   一時停止の上に重なる */
+#pauseShade {
+  position: absolute; inset: 0; z-index: 38;
+  background: rgba(12, 12, 16, .55);
   pointer-events: none;
 }
-.pause-menu[open] { display: grid; place-items: center; }
+#pauseShade[hidden] { display: none; }
+/* 盤面とドックの区分を持ち上げる指定は、チュートリアルの暗がりの
+   節（後ろの方）にある。一時停止中はそちらより後ろの指定で
+   39 にそろえる（あちらを参照） */
+.pause-menu {
+  position: absolute; inset: 0; z-index: 39;
+  display: grid; place-items: center;
+  margin: 0; border: none; padding: 0; background: transparent;
+  pointer-events: none;
+}
+.pause-menu[hidden] { display: none; }
 .pause-card { position: relative; width: 78%; max-width: 300px; pointer-events: auto; }
 .pause-card .confirm-title { text-align: center; }
 .pause-card .confirm-btns { flex-direction: column; }
@@ -1254,40 +1257,41 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 .tut-thumb { width: 48px; height: 48px; container-type: size; flex: none; }
 .tut-stage { position: relative; height: 48px; flex: none; }
 .tut-slots { display: flex; gap: 10px; }
+.tut-slots-v { flex-direction: column; }
 .tut-slots span {
   width: 48px; height: 48px; border-radius: 12px; flex: none;
   background: rgba(28, 28, 40, .06);
 }
 .tut-actor { position: absolute; top: 0; left: 0; width: 48px; height: 48px; }
 .tut-face { position: absolute; inset: 0; display: block; }
-.tut-anim-swap-a { animation: tut-swap-a 3s ease-in-out infinite; }
-.tut-anim-swap-b { animation: tut-swap-b 3s ease-in-out infinite; }
+.tut-anim-swap-a-v { animation: tut-swap-a-v 3s ease-in-out infinite; }
+.tut-anim-swap-b-v { animation: tut-swap-b-v 3s ease-in-out infinite; }
 .tut-anim-sleep-out { animation: tut-sleep-out 3s ease-in-out infinite; }
 .tut-anim-sleep-in { opacity: 0; animation: tut-sleep-in 3s ease-in-out infinite; }
-.tut-anim-merge-a { animation: tut-merge-a 3s ease-in-out infinite; }
+.tut-anim-merge-a-v { animation: tut-merge-a-v 3s ease-in-out infinite; }
 .tut-anim-face-out { animation: tut-face-out 3s ease-in-out infinite; }
 .tut-anim-face-in { opacity: 0; animation: tut-face-in 3s ease-in-out infinite; }
-.tut-anim-slide2 { animation: tut-slide2 3s ease-in-out infinite; }
+.tut-anim-slide2-v { animation: tut-slide2-v 3s ease-in-out infinite; }
 .tut-badge-pulse .fuse { animation: tut-fuse-pulse 3s ease-in-out infinite; }
 .tut-glow .app-icon { animation: tut-glow-icon 3s ease-in-out infinite; }
 .tut-ring .app-icon { animation: tut-ring-icon 3s ease-in-out infinite; }
-@keyframes tut-swap-a {
-  0% { transform: translateX(0); opacity: 0; }
-  6% { transform: translateX(0); opacity: 1; }
-  28% { transform: translateX(0); opacity: 1; }
-  50% { transform: translateX(58px); opacity: 1; }
-  86% { transform: translateX(58px); opacity: 1; }
-  94% { transform: translateX(58px); opacity: 0; }
-  100% { transform: translateX(0); opacity: 0; }
+@keyframes tut-swap-a-v {
+  0% { transform: translateY(0); opacity: 0; }
+  6% { transform: translateY(0); opacity: 1; }
+  28% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(58px); opacity: 1; }
+  86% { transform: translateY(58px); opacity: 1; }
+  94% { transform: translateY(58px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 0; }
 }
-@keyframes tut-swap-b {
-  0% { transform: translateX(0); opacity: 0; }
-  6% { transform: translateX(0); opacity: 1; }
-  28% { transform: translateX(0); opacity: 1; }
-  50% { transform: translateX(-58px); opacity: 1; }
-  86% { transform: translateX(-58px); opacity: 1; }
-  94% { transform: translateX(-58px); opacity: 0; }
-  100% { transform: translateX(0); opacity: 0; }
+@keyframes tut-swap-b-v {
+  0% { transform: translateY(0); opacity: 0; }
+  6% { transform: translateY(0); opacity: 1; }
+  28% { transform: translateY(0); opacity: 1; }
+  50% { transform: translateY(-58px); opacity: 1; }
+  86% { transform: translateY(-58px); opacity: 1; }
+  94% { transform: translateY(-58px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 0; }
 }
 @keyframes tut-sleep-out {
   0%, 24% { opacity: 1; }
@@ -1299,13 +1303,13 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   38%, 72% { opacity: 1; }
   88%, 100% { opacity: 0; }
 }
-@keyframes tut-merge-a {
-  0% { transform: translateX(0); opacity: 0; }
-  6% { transform: translateX(0); opacity: 1; }
-  28% { transform: translateX(0); opacity: 1; }
-  48% { transform: translateX(58px); opacity: 1; }
-  58%, 94% { transform: translateX(58px); opacity: 0; }
-  100% { transform: translateX(0); opacity: 0; }
+@keyframes tut-merge-a-v {
+  0% { transform: translateY(0); opacity: 0; }
+  6% { transform: translateY(0); opacity: 1; }
+  28% { transform: translateY(0); opacity: 1; }
+  48% { transform: translateY(58px); opacity: 1; }
+  58%, 94% { transform: translateY(58px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 0; }
 }
 @keyframes tut-face-out {
   0%, 48% { opacity: 1; }
@@ -1317,14 +1321,14 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
   64% { transform: scale(1); }
   100% { opacity: 1; transform: scale(1); }
 }
-@keyframes tut-slide2 {
-  0% { transform: translateX(0); opacity: 0; }
-  6% { transform: translateX(0); opacity: 1; }
-  24% { transform: translateX(0); opacity: 1; }
-  56% { transform: translateX(116px); opacity: 1; }
-  86% { transform: translateX(116px); opacity: 1; }
-  94% { transform: translateX(116px); opacity: 0; }
-  100% { transform: translateX(0); opacity: 0; }
+@keyframes tut-slide2-v {
+  0% { transform: translateY(0); opacity: 0; }
+  6% { transform: translateY(0); opacity: 1; }
+  24% { transform: translateY(0); opacity: 1; }
+  56% { transform: translateY(116px); opacity: 1; }
+  86% { transform: translateY(116px); opacity: 1; }
+  94% { transform: translateY(116px); opacity: 0; }
+  100% { transform: translateY(0); opacity: 0; }
 }
 @keyframes tut-fuse-pulse {
   0%, 100% { transform: scale(1); }
@@ -1436,6 +1440,10 @@ body { display: flex; align-items: center; justify-content: center; min-height: 
 }
 #tutShade[hidden] { display: none; }
 .phone.tut-shading .board-wrap { position: relative; z-index: 49; }
+/* 一時停止中は、チュートリアルや機嫌の注目（上の49）よりこちらを
+   優先して区分を39にそろえる。一時停止のカード（39・後ろの要素
+   なので上に出る）が盤面の下に潜らず、必ず押せるようにするため */
+.phone.pausing .board-wrap { position: relative; z-index: 39; }
 /* 電池を説明する⑦以外はステータスバーも覆いの下に置く。
    覆いはタップを拾わないので一時停止はどの案内でも押せる。 */
 .phone:is(.tut-shading, .tut-goal2) .statusbar { z-index: 47; }

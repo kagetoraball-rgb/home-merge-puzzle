@@ -156,7 +156,9 @@
 
   <div class="notch-label" id="notchLabel" aria-label="合体数3を作ったらクリア"><span class="mini-generic"><span class="mini-eyes"><i></i><i></i></span><span class="mini-badge"><span class="mini-badge-num">3</span></span></span>を作ったらクリア</div>
 
-  <dialog id="pauseMenu" class="pause-menu" aria-labelledby="pauseTitle">
+  <div id="pauseShade" hidden aria-hidden="true"></div>
+
+  <div id="pauseMenu" class="pause-menu" role="dialog" aria-labelledby="pauseTitle" hidden>
     <div class="confirm-card pause-card">
       <button id="pauseClose" class="pause-close" type="button" aria-label="閉じる">×</button>
       <p id="pauseTitle" class="confirm-title">一時停止</p>
@@ -165,7 +167,7 @@
         <button id="pauseEnd" class="confirm-btn" type="button">プレイ終了</button>
       </div>
     </div>
-  </dialog>
+  </div>
 
   <div class="power-overlay" id="powerOverlay" hidden>
     <div class="power-body">

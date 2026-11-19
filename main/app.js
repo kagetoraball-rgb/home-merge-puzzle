@@ -38,6 +38,12 @@
   const rebootHash = '#reset-reboot';
   const rebootToTitle = location.hash === rebootHash;
   let titleLocked = true;
+  // ラン中に離脱したら自動で一時停止し、復帰は一時停止の画面にする
+  // （2026-11-19 ユーザー指示）。離脱した印は保存にも残し、ページが
+  // 作り直されて戻ってきた場合もタイトル画面ではなく一時停止で復帰する
+  const RESUME_PAUSE_KEY = 'homeMerge.resumePause.v1';
+  let resumePausePending = false;
+  try { resumePausePending = localStorage.getItem(RESUME_PAUSE_KEY) === '1'; } catch (_) { /* noop */ }
   const statusText = document.getElementById('statusText');
   // 時刻は端末の時計にそのまま合わせる（ブラウザの Date は端末のローカル時刻）。
   // 実際のスマホのステータスバーと同じで、手動の時刻設定は持たない
@@ -746,44 +752,44 @@
     return `<div class="tut-thumb">${iconHTML(icon)}</div>`;
   }
   function tutDiagramHTML(key) {
-    const slots = n => `<div class="tut-slots">${'<span></span>'.repeat(n)}</div>`;
+    const slots = (n, vertical) => `<div class="tut-slots${vertical ? ' tut-slots-v' : ''}">${'<span></span>'.repeat(n)}</div>`;
     switch (key) {
-      case 'swap1': // ① 2つが入れ替わる
-        return `<div class="tut-stage" style="width:106px">${slots(2)}`
-          + `<div class="tut-actor tut-anim-swap-a">${tutThumb('yoko', 1)}</div>`
-          + `<div class="tut-actor tut-anim-swap-b" style="left:58px">${tutThumb('tate', 1)}</div></div>`;
+      case 'swap1': // ① 2つが入れ替わる（タテは縦にしか動けないので縦の入れ替えで見せる）
+        return `<div class="tut-stage" style="width:48px;height:106px">${slots(2, true)}`
+          + `<div class="tut-actor tut-anim-swap-a-v">${tutThumb('tate', 1)}</div>`
+          + `<div class="tut-actor tut-anim-swap-b-v" style="top:58px">${tutThumb('yoko', 1)}</div></div>`;
       case 'sleep': // ② 眠って、しばらくして目覚める
         return `<div class="tut-stage" style="width:48px">`
           + `<span class="tut-face tut-anim-sleep-out">${tutThumb('tate', 1)}</span>`
           + `<span class="tut-face tut-anim-sleep-in">${tutThumb('tate', 1, { z: 1 })}</span></div>`;
-      case 'merge1': // ③ 同じ種類を重ねると数が増える
-        return `<div class="tut-stage" style="width:106px">${slots(2)}`
-          + `<div class="tut-actor tut-anim-merge-a">${tutThumb('tate', 1)}</div>`
-          + `<div class="tut-actor" style="left:58px">`
+      case 'merge1': // ③ 同じ種類を重ねると数が増える（タテ同士は縦に重なる）
+        return `<div class="tut-stage" style="width:48px;height:106px">${slots(2, true)}`
+          + `<div class="tut-actor tut-anim-merge-a-v">${tutThumb('tate', 1)}</div>`
+          + `<div class="tut-actor" style="top:58px">`
           + `<span class="tut-face tut-anim-face-out">${tutThumb('tate', 1)}</span>`
           + `<span class="tut-face tut-anim-face-in">${tutThumb('tate', 2)}</span></div></div>`;
       case 'move2Badge': // ④ 数2のバッジが目立つ
         return `<div class="tut-stage tut-badge-pulse" style="width:48px">${tutThumb('tate', 2)}</div>`;
-      case 'move2Range': // ⑤ 数2は2マス動く
-        return `<div class="tut-stage" style="width:164px">${slots(3)}`
-          + `<div class="tut-actor tut-anim-slide2">${tutThumb('tate', 2)}</div></div>`;
-      case 'pair': // ⑥ 合体で方向が揃う（合体先と右隣が光る）
-        return `<div class="tut-stage" style="width:164px">${slots(3)}`
-          + `<div class="tut-actor tut-anim-merge-a">${tutThumb('tate', 1)}</div>`
-          + `<div class="tut-actor" style="left:58px">`
+      case 'move2Range': // ⑤ 数2は2マス動く（タテは縦に2マス）
+        return `<div class="tut-stage" style="width:48px;height:164px">${slots(3, true)}`
+          + `<div class="tut-actor tut-anim-slide2-v">${tutThumb('tate', 2)}</div></div>`;
+      case 'pair': // ⑥ 合体で方向が揃う（合体先と、その下の同じ種類が光る）
+        return `<div class="tut-stage" style="width:48px;height:164px">${slots(3, true)}`
+          + `<div class="tut-actor tut-anim-merge-a-v">${tutThumb('tate', 1)}</div>`
+          + `<div class="tut-actor" style="top:58px">`
           + `<span class="tut-face tut-anim-face-out">${tutThumb('tate', 1)}</span>`
           + `<span class="tut-face tut-anim-face-in tut-glow">${tutThumb('tate', 2)}</span></div>`
-          + `<div class="tut-actor tut-glow" style="left:116px">${tutThumb('tate', 1)}</div></div>`;
+          + `<div class="tut-actor tut-glow" style="top:116px">${tutThumb('tate', 1)}</div></div>`;
       case 'goal': { // ⑦ 電池が切れる／画面が一杯になる
         const cells = Array.from({ length: 8 }, (_, i) =>
           `<span style="animation-delay:${(i * 0.22).toFixed(2)}s"></span>`).join('');
         return `<div class="tut-goal-fig"><div class="tut-batt"><div class="tut-batt-fill"></div></div>`
           + `<div class="tut-fillgrid">${cells}</div></div>`;
       }
-      case 'goal2': // ⑧ 重ねて数3を作る
-        return `<div class="tut-stage" style="width:106px">${slots(2)}`
-          + `<div class="tut-actor tut-anim-merge-a">${tutThumb('tate', 2)}</div>`
-          + `<div class="tut-actor" style="left:58px">`
+      case 'goal2': // ⑧ 重ねて数3を作る（タテ同士は縦に重なる）
+        return `<div class="tut-stage" style="width:48px;height:106px">${slots(2, true)}`
+          + `<div class="tut-actor tut-anim-merge-a-v">${tutThumb('tate', 2)}</div>`
+          + `<div class="tut-actor" style="top:58px">`
           + `<span class="tut-face tut-anim-face-out">${tutThumb('tate', 2)}</span>`
           + `<span class="tut-face tut-anim-face-in tut-ring">${tutThumb('tate', 3)}</span></div></div>`;
       default:
@@ -3365,7 +3371,22 @@
     else if (bgmCtxEverRan) audioInterruptHook();
     else bgmStart();
   }
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) audioReturnCheck(); });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) { audioReturnCheck(); return; }
+    // ラン中の離脱を検知したら、自動で一時停止する（復帰は一時停止の画面）
+    const page = currentPage();
+    if (titleLocked || !page || !page.state || page.state.status !== 'playing') return;
+    if (!pauseOpen) { cancelInteractions(); openPause(); }
+  });
+  // 一時停止したままページが作り直される（離脱中に破棄される等）場合に
+  // 備え、閉じる間際に印を残す。復帰時はタイトル画面ではなく一時停止の
+  // 画面にする。手動の再読み込み（停止していない）では印は残らない
+  window.addEventListener('pagehide', () => {
+    if (!pauseOpen) return;
+    const page = currentPage();
+    if (!page || !page.state || page.state.status !== 'playing') return;
+    try { localStorage.setItem(RESUME_PAUSE_KEY, '1'); } catch (_) { /* noop */ }
+  });
   window.addEventListener('pageshow', audioReturnCheck);
   window.addEventListener('focus', audioReturnCheck);
 
@@ -4096,21 +4117,29 @@
    * 新規クリアとしての進行（次のページの解放）には使わない */
   const pauseBtn = document.getElementById('pauseBtn');
   const pauseMenu = document.getElementById('pauseMenu');
+  const pauseShadeEl = document.getElementById('pauseShade');
   let pauseOpen = false;
   let pauseReturnFocus = null;
   function openPause() {
     if (pauseOpen || !pauseMenu) return;
     pauseOpen = true;
     pauseReturnFocus = document.activeElement;
-    // モーダルにするとドックまで塞がれるので、モーダルなしで開く。
-    // 暗転はクリックを素通しし（style.css）、盤面の操作は
-    // pointerdown 側の pauseOpen チェックで止める
-    try { pauseMenu.show(); } catch (_) { /* noop */ }
+    // 覆いはチュートリアルと同じ仕組み（全体の一枚＋盤面とドックの
+    // 区分はその上）。暗転はクリックを素通しし（style.css）、盤面の
+    // 操作は pointerdown 側の pauseOpen チェックで止める
+    if (pauseShadeEl) pauseShadeEl.hidden = false;
+    phoneEl.classList.add('pausing');
+    pauseMenu.hidden = false;
   }
   function closePause() {
     if (!pauseOpen) return;
     pauseOpen = false;
-    try { pauseMenu.close(); } catch (_) { /* noop */ }
+    // 一時停止を閉じたら、離脱からの復帰の印も消す
+    try { localStorage.removeItem(RESUME_PAUSE_KEY); } catch (_) { /* noop */ }
+    resumePausePending = false;
+    if (pauseShadeEl) pauseShadeEl.hidden = true;
+    phoneEl.classList.remove('pausing');
+    if (pauseMenu) pauseMenu.hidden = true;
     if (pauseReturnFocus && pauseReturnFocus.focus) {
       try { pauseReturnFocus.focus(); } catch (_) { /* noop */ }
     }
@@ -4121,7 +4150,7 @@
   if (pauseResumeBtn) pauseResumeBtn.addEventListener('click', closePause);
   const pauseCloseBtn = document.getElementById('pauseClose');
   if (pauseCloseBtn) pauseCloseBtn.addEventListener('click', closePause);
-  if (pauseMenu) pauseMenu.addEventListener('cancel', (e) => { e.preventDefault(); closePause(); });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && pauseOpen) closePause(); });
   const pauseEndBtn = document.getElementById('pauseEnd');
   if (pauseEndBtn) pauseEndBtn.addEventListener('click', () => { closePause(); endPlayFromPause(); });
   function endPlayFromPause() {
@@ -4521,6 +4550,20 @@
 
     const lockedLayers = Array.from(phoneEl.children).filter(layer =>
       layer !== screen && layer !== powerOverlay && !layer.inert);
+    // 離脱中に自動で一時停止した印が残っていて、ランが続いているなら、
+    // タイトル画面は出さずに一時停止の画面で復帰する
+    const resumePage = currentPage();
+    const resumeToPause = resumePausePending && !rebootToTitle && resumePage
+      && resumePage.state && resumePage.state.status === 'playing';
+    if (resumeToPause) {
+      titleLocked = false;
+      screen.hidden = true;
+      return;
+    }
+    if (resumePausePending) {
+      try { localStorage.removeItem(RESUME_PAUSE_KEY); } catch (_) { /* noop */ }
+      resumePausePending = false;
+    }
     for (const layer of lockedLayers) layer.inert = true;
 
     const defaultWallpaper = WALLPAPER_PRESETS.find(preset => preset.id === DEFAULT_PRESET_ID);
@@ -4547,4 +4590,6 @@
   renderPageBar();
   render(state.icons, null);
   initTitleScreen();
+  // 離脱からの復帰は、一時停止を開いた状態で始める
+  if (resumePausePending && !titleLocked) openPause();
 })();
