@@ -1,0 +1,1 @@
+{"description":"ぴょいっとアイコンパズル。対戦の中継（WebSocket）","engines":{"node":">=18"},"name":"home-merge-puzzle-relay","private":true,"scripts":{"start":"node server.cjs"}}
